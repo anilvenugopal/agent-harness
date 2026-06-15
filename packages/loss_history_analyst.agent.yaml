@@ -1,0 +1,63 @@
+# loss_history_analyst — sub-agent delegated by underwriting_agent.
+#
+# Demonstrates the delegated-run boundary: it writes its OWN decision record
+# (depth=1, parent_decision_id set), has its own tools, and returns a
+# structured result to the parent. HITL gates are NOT permitted here (a
+# synchronous delegation would block the parent worker — out of scope by
+# design); the engine denies any gate fired at depth > 0.
+
+name: loss_history_analyst
+kind: agent
+version: v1
+description: Pull and summarise commercial property loss history for underwriting.
+
+system_prompt: |
+  You are a loss history analyst. Use pull_loss_runs to retrieve all claims for
+  the insured. Compute the 5-year incurred total and loss ratio from the returned
+  records. Flag any single loss exceeding $50,000 as a large loss. Call
+  submit_output with your findings; do not add recommendations.
+
+prompt_template: |
+  Analyse loss history for:  {{input.named_insured}}
+  Policy period context:     last 5 years
+
+inference:
+  fallback_enabled: true
+  chain:
+    - provider: anthropic
+      model: claude-haiku-4-5-20251001
+      priority: 0
+      max_tokens: 1024
+    - provider: gemini
+      model: gemini-2.5-flash
+      priority: 1
+      max_tokens: 1024
+  max_turns: 5
+  max_usd: 0.25
+
+tools:
+  - name: pull_loss_runs
+    description: >
+      Retrieve all claims filed in the past 5 years for a named insured,
+      including date, cause of loss, incurred amount, and status.
+    transport: mcp_http
+    mcp_server: policy_service
+    mcp_tool_name: pull_loss_runs
+    input_schema:
+      type: object
+      properties:
+        named_insured: {type: string}
+      required: [named_insured]
+
+output_schema:
+  loss_count:
+    type: integer
+  incurred_total:
+    type: number
+  loss_ratio:
+    type: number
+  large_losses:
+    type: array
+    items: {type: string}
+  narrative:
+    type: string

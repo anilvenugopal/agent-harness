@@ -1,11 +1,11 @@
-# underwriting_agent — an AGENT package (unsigned YAML analog of a .vax artifact).
+# underwriting_agent — commercial property underwriting agent.
 #
-# The flagship example. Exercises every engine capability in one run:
-#   - a Postgres SOURCE (pull the applicant record into context)
-#   - a python in-process TOOL (calculate_risk_score)
-#   - an MCP TOOL over Streamable HTTP (lookup_policy, from the example server)
-#   - DELEGATION to research_subagent (governed sub-agent)
-#   - a HITL GATE on issue_binder (human must approve before a binder is issued)
+# Exercises every engine capability in one run:
+#   - a Postgres SOURCE (submission record into context)
+#   - a python in-process TOOL (rate_property — COPE rating)
+#   - MCP TOOLS over Streamable HTTP (property_data, lookup_appetite from policy_service)
+#   - DELEGATION to loss_history_analyst (governed sub-agent, writes its own decision record)
+#   - a HITL GATE on bind_policy (underwriter must approve before a policy is bound)
 #   - an S3 TARGET (write the underwriting decision)
 #   - a fallback model CHAIN (Claude → OpenAI → Gemini)
 #   - forced structured output via submit_output
@@ -13,22 +13,49 @@
 name: underwriting_agent
 kind: agent
 version: v1
-description: Underwrite an insurance application end to end.
+description: Underwrite a small commercial property submission end to end.
 
 system_prompt: |
-  You are an insurance underwriting agent. You will be given an applicant.
-  Steps: (1) pull supporting research by delegating to the researcher,
-  (2) look up the applicable policy rules via the policy tool, (3) compute a
-  risk score, (4) if issuing a binder, call issue_binder (this requires human
-  approval), then (5) call submit_output with your final decision.
+  You are a commercial property underwriting agent. You will be given a submission
+  record for a building to be insured.
+
+  Work through the following steps in order:
+
+  1. LOSS HISTORY — delegate to loss_history_analyst with the named_insured from the
+     submission. Review the returned loss_count, loss_ratio, and any large losses.
+
+  2. APPETITE & AUTHORITY — call lookup_appetite with the submission's line_of_business,
+     occupancy, construction, and state. Note whether the risk is in_appetite, the
+     authority_tiv, authority_premium, and any referral_triggers.
+
+  3. PROPERTY ENRICHMENT — call property_data with the submission's address. Note
+     protection_class, wind_zone, distance_to_coast_mi, and prior_cat.
+
+  4. COPE RATING — call rate_property with tiv, occupancy, construction,
+     protection_class, sprinklered, and deductible from the submission.
+     Record the returned premium and cope_factors.
+
+  5. DECISION — apply all of the following checks. If ALL pass, the risk may be bound:
+       - in_appetite is True
+       - TIV ≤ authority_tiv
+       - computed premium ≤ authority_premium
+       - loss_ratio < 0.60
+       - wind_zone is "none" OR distance_to_coast_mi > 25
+     If all checks pass: call bind_policy (HUMAN SIGN-OFF REQUIRED — the run will
+     suspend until an underwriter approves). Then call submit_output with
+     decision="bound" and referral_reasons=[].
+     If any check fails: DO NOT call bind_policy. Call submit_output directly with
+     decision="refer" (or "decline" for out-of-appetite) and list every failed
+     check in referral_reasons.
+
+  Always populate cope_factors and coverage_summary in submit_output.
 
 prompt_template: |
-  Underwrite this application:
-  applicant_id: {{input.applicant_id}}
-  product: {{input.product}}
+  Underwrite this commercial property submission:
+  submission_id: {{input.submission_id}}
 
-  Applicant record from system of record:
-  {{context.applicant}}
+  Submission record from system of record:
+  {{context.submission}}
 
 inference:
   fallback_enabled: true
@@ -38,11 +65,11 @@ inference:
       priority: 0
       max_tokens: 2048
     - provider: openai
-      model: gpt-5.1
+      model: gpt-4.1
       priority: 1
       max_tokens: 2048
     - provider: gemini
-      model: gemini-3-pro
+      model: gemini-2.5-pro
       priority: 2
       max_tokens: 2048
   max_turns: 10
@@ -51,59 +78,87 @@ inference:
 sources:
   - connector: pg_main
     method: query
-    ref: "SELECT id, name, age, risk_band, prior_claims FROM applicant WHERE id = {{input.applicant_id}}"
-    bind_to: applicant
+    ref: "SELECT * FROM submission WHERE id = {{input.submission_id}}"
+    bind_to: submission
     required: true
 
 tools:
-  - name: calculate_risk_score
-    description: Compute a 0-100 risk score from applicant attributes.
+  - name: property_data
+    description: >
+      Retrieve third-party property data for an address: verified protection class,
+      wind/flood zone, distance to coast, and prior catastrophe history.
+    transport: mcp_http
+    mcp_server: policy_service
+    mcp_tool_name: property_data
+    input_schema:
+      type: object
+      properties:
+        address: {type: string}
+      required: [address]
+
+  - name: lookup_appetite
+    description: >
+      Check carrier underwriting guidelines for a risk: whether it is in appetite,
+      the binding authority limits (max TIV and max premium), and any referral triggers.
+    transport: mcp_http
+    mcp_server: policy_service
+    mcp_tool_name: lookup_appetite
+    input_schema:
+      type: object
+      properties:
+        line:         {type: string}
+        occupancy:    {type: string}
+        construction: {type: string}
+        state:        {type: string}
+      required: [line, occupancy, construction, state]
+
+  - name: rate_property
+    description: >
+      Compute the annual premium using the COPE framework (Construction, Occupancy,
+      Protection, Exposure). Returns the premium and a factor breakdown.
     transport: python_inprocess
     input_schema:
       type: object
       properties:
-        age: {type: integer}
-        risk_band: {type: string}
-        prior_claims: {type: integer}
-      required: [age, risk_band, prior_claims]
-
-  - name: lookup_policy
-    description: Look up underwriting rules for a product from the policy service.
-    transport: mcp_http
-    mcp_server: policy_service
-    mcp_tool_name: lookup_policy
-    input_schema:
-      type: object
-      properties:
-        product: {type: string}
-      required: [product]
+        tiv:              {type: number}
+        occupancy:        {type: string}
+        construction:     {type: string}
+        protection_class: {type: integer}
+        sprinklered:      {type: boolean}
+        deductible:       {type: integer}
+      required: [tiv, occupancy, construction, protection_class, sprinklered, deductible]
 
   - name: delegate_to_agent
-    description: Delegate a research task to a registered sub-agent.
+    description: Delegate a task to a registered sub-agent.
     transport: verity_builtin
     input_schema:
       type: object
       properties:
         agent_name: {type: string}
-        context: {type: object}
+        context:    {type: object}
       required: [agent_name, context]
 
-  - name: issue_binder
-    description: Issue an insurance binder (HUMAN APPROVAL REQUIRED).
+  - name: bind_policy
+    description: >
+      Bind the policy and issue a binder number. HUMAN APPROVAL REQUIRED — call this
+      only when the risk passes all appetite, authority, and loss-history checks.
+      The run will suspend until an underwriter approves.
     transport: python_inprocess
     input_schema:
       type: object
       properties:
-        applicant_id: {type: integer}
-        premium: {type: number}
-      required: [applicant_id, premium]
+        submission_id: {type: integer}
+        premium:       {type: number}
+        limit:         {type: number}
+        deductible:    {type: integer}
+      required: [submission_id, premium, limit, deductible]
 
 delegations:
-  - child_agent: research_subagent
+  - child_agent: loss_history_analyst
 
 hitl:
   enabled: true
-  require_approval_for: [issue_binder]
+  require_approval_for: [bind_policy]
 
 targets:
   - connector: s3_main
@@ -115,10 +170,15 @@ targets:
 output_schema:
   decision:
     type: string
-    enum: [approve, decline, refer]
+    enum: [bound, quote, refer, decline]
   premium:
     type: number
-  risk_score:
-    type: number
+  coverage_summary:
+    type: object
+  cope_factors:
+    type: object
+  referral_reasons:
+    type: array
+    items: {type: string}
   rationale:
     type: string

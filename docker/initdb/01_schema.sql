@@ -58,15 +58,31 @@ CREATE TABLE IF NOT EXISTS agent_decision_log (
 CREATE INDEX IF NOT EXISTS idx_decision_parent ON agent_decision_log (parent_decision_id);
 
 -- ── demo data the underwriting_agent's Postgres SOURCE reads ──
-CREATE TABLE IF NOT EXISTS applicant (
-    id           INT PRIMARY KEY,
-    name         TEXT NOT NULL,
-    age          INT  NOT NULL,
-    risk_band    TEXT NOT NULL,
-    prior_claims INT  NOT NULL DEFAULT 0
+CREATE TABLE IF NOT EXISTS submission (
+    id               INT PRIMARY KEY,
+    named_insured    TEXT    NOT NULL,
+    line_of_business TEXT    NOT NULL,
+    state            TEXT    NOT NULL,
+    address          TEXT    NOT NULL,
+    occupancy        TEXT    NOT NULL,
+    construction     TEXT    NOT NULL,
+    year_built       INT,
+    square_feet      INT,
+    protection_class INT,
+    sprinklered      BOOLEAN NOT NULL DEFAULT false,
+    tiv              NUMERIC NOT NULL,
+    coverage_limit   NUMERIC NOT NULL,
+    deductible       INT     NOT NULL,
+    valuation        TEXT    NOT NULL DEFAULT 'replacement_cost',
+    coinsurance      NUMERIC NOT NULL DEFAULT 0.9
 );
-INSERT INTO applicant (id, name, age, risk_band, prior_claims) VALUES
-    (1, 'Dana Lee',   41, 'medium', 1),
-    (2, 'Sam Okoro',  29, 'low',    0),
-    (3, 'Rae Cohen',  57, 'high',   3)
+INSERT INTO submission VALUES
+  (1, 'Lakeview Bistro LLC',  'commercial_property', 'IL',
+   '221 Lakeview Ave, Chicago, IL',
+   'restaurant', 'joisted_masonry', 1998, 4200,  4, true,
+   1850000, 1850000, 5000,  'replacement_cost', 0.9),
+  (2, 'Gulfside Storage Inc', 'commercial_property', 'FL',
+   '9 Harbor Rd, Tampa, FL',
+   'warehouse',  'frame',            1975, 60000, 8, false,
+   8000000, 8000000, 10000, 'replacement_cost', 0.9)
 ON CONFLICT (id) DO NOTHING;

@@ -7,9 +7,9 @@ configuration layer — it tells the engine *what* to do, not *how* to do it. Th
 engine reads the package, then executes it.
 
 ```
-packages/classify_document.task.yaml     → a Task
-packages/underwriting_agent.agent.yaml   → an Agent
-packages/research_subagent.agent.yaml    → an Agent (delegation target)
+packages/classify_document.task.yaml       → a Task
+packages/underwriting_agent.agent.yaml     → an Agent
+packages/loss_history_analyst.agent.yaml   → an Agent (delegation target)
 ```
 
 Every field in these files maps to a Python class in `harness/core/package.py`.
@@ -80,19 +80,19 @@ but is not enforced by the loader.
 
 ```yaml
 system_prompt: |
-  You are an insurance underwriting agent. You will be given an applicant.
-  Steps: (1) pull supporting research by delegating to the researcher,
-  (2) look up the applicable policy rules via the policy tool, (3) compute a
-  risk score, (4) if issuing a binder, call issue_binder (human approval required),
-  then (5) call submit_output with your final decision.
+  You are a commercial property underwriting agent. You will be given a submission
+  record for a building to be insured. Steps: (1) delegate to loss_history_analyst
+  for loss history, (2) call lookup_appetite for carrier rules, (3) call
+  property_data for third-party enrichment, (4) call rate_property (COPE rating),
+  (5) if all checks pass call bind_policy (human approval required), then call
+  submit_output. If any check fails, call submit_output directly with decision=refer.
 
 prompt_template: |
-  Underwrite this application:
-  applicant_id: {{input.applicant_id}}
-  product: {{input.product}}
+  Underwrite this commercial property submission:
+  submission_id: {{input.submission_id}}
 
-  Applicant record from system of record:
-  {{context.applicant}}
+  Submission record from system of record:
+  {{context.submission}}
 ```
 
 `system_prompt` sets the model's role. It goes into the `system` parameter of
@@ -106,7 +106,7 @@ two scopes:
 | `{{input.x}}` | fields from the run's input dict |
 | `{{context.x}}` | data fetched from sources (Postgres, etc.) |
 
-So `{{context.applicant}}` is populated by whatever the `pg_main` source
+So `{{context.submission}}` is populated by whatever the `pg_main` source
 connector fetched before the loop starts. The model sees the rendered text — it
 never knows about Postgres or the template engine.
 
@@ -116,17 +116,18 @@ never knows about Postgres or the template engine.
 
 ```yaml
 inference:
+  fallback_enabled: true
   chain:
     - provider: anthropic
       model: claude-opus-4-8
       priority: 0
       max_tokens: 2048
     - provider: openai
-      model: gpt-5.1
+      model: gpt-4.1
       priority: 1
       max_tokens: 2048
     - provider: gemini
-      model: gemini-3-pro
+      model: gemini-2.5-pro
       priority: 2
       max_tokens: 2048
   max_turns: 10
@@ -167,30 +168,36 @@ every turn.
 
 ```yaml
 tools:
-  - name: calculate_risk_score
-    description: Compute a 0-100 risk score from applicant attributes.
+  - name: rate_property
+    description: Compute annual premium via the COPE framework.
     transport: python_inprocess
     input_schema:
       type: object
       properties:
-        age:          {type: integer}
-        risk_band:    {type: string}
-        prior_claims: {type: integer}
-      required: [age, risk_band, prior_claims]
+        tiv:              {type: number}
+        occupancy:        {type: string}
+        construction:     {type: string}
+        protection_class: {type: integer}
+        sprinklered:      {type: boolean}
+        deductible:       {type: integer}
+      required: [tiv, occupancy, construction, protection_class, sprinklered, deductible]
 
-  - name: lookup_policy
-    description: Look up underwriting rules for a product from the policy service.
+  - name: lookup_appetite
+    description: Check carrier appetite and binding authority for a risk.
     transport: mcp_http
     mcp_server: policy_service
-    mcp_tool_name: lookup_policy
+    mcp_tool_name: lookup_appetite
     input_schema:
       type: object
       properties:
-        product: {type: string}
-      required: [product]
+        line:         {type: string}
+        occupancy:    {type: string}
+        construction: {type: string}
+        state:        {type: string}
+      required: [line, occupancy, construction, state]
 
   - name: delegate_to_agent
-    description: Delegate a research task to a registered sub-agent.
+    description: Delegate a task to a registered sub-agent.
     transport: verity_builtin
     input_schema:
       type: object
@@ -199,22 +206,24 @@ tools:
         context:    {type: object}
       required: [agent_name, context]
 
-  - name: issue_binder
-    description: Issue an insurance binder (HUMAN APPROVAL REQUIRED).
+  - name: bind_policy
+    description: Issue a binder. HUMAN APPROVAL REQUIRED.
     transport: python_inprocess
     input_schema:
       type: object
       properties:
-        applicant_id: {type: integer}
-        premium:      {type: number}
-      required: [applicant_id, premium]
+        submission_id: {type: integer}
+        premium:       {type: number}
+        limit:         {type: number}
+        deductible:    {type: integer}
+      required: [submission_id, premium, limit, deductible]
 ```
 
 Each entry is a `ToolAuthorization`. There are four transports:
 
 ```
 transport: python_inprocess   → a Python function registered in the worker
-                                (calculate_risk_score, issue_binder)
+                                (rate_property, bind_policy)
 
 transport: mcp_http           → a remote MCP server over Streamable HTTP
 transport: mcp_stdio          → an MCP server launched as a subprocess
@@ -239,16 +248,16 @@ uses it to know what arguments to provide.
 sources:
   - connector: pg_main
     method: query
-    ref: "SELECT id, name, age, risk_band, prior_claims FROM applicant WHERE id = {{input.applicant_id}}"
-    bind_to: applicant
+    ref: "SELECT * FROM submission WHERE id = {{input.submission_id}}"
+    bind_to: submission
     required: true
 ```
 
 Sources are resolved **before** the first model turn. The binder:
-1. Templates `ref` with `{{input.applicant_id}}` from the run's input
+1. Templates `ref` with `{{input.submission_id}}` from the run's input
 2. Calls the `pg_main` connector's `fetch("query", rendered_ref)` method
-3. Places the result under `context["applicant"]`
-4. The prompt template then renders `{{context.applicant}}` into the user message
+3. Places the result under `context["submission"]`
+4. The prompt template then renders `{{context.submission}}` into the user message
 
 If `required: true` and the source fails (connector missing, query error), the
 run fails immediately with a `SourceResolutionError` — no model call is made.
@@ -302,11 +311,11 @@ completing silently with missing data.
 
 ```yaml
 delegations:
-  - child_agent: research_subagent
+  - child_agent: loss_history_analyst
 ```
 
 This is a governance allowlist. When the model calls `delegate_to_agent` with
-`agent_name: "research_subagent"`, the engine checks this list first. If the name
+`agent_name: "loss_history_analyst"`, the engine checks this list first. If the name
 is not here, the call is denied — the model cannot delegate to an agent the package
 didn't authorize, even if that agent package exists.
 
@@ -317,15 +326,15 @@ didn't authorize, even if that agent package exists.
 ```yaml
 hitl:
   enabled: true
-  require_approval_for: [issue_binder]
+  require_approval_for: [bind_policy]
 ```
 
 When `enabled: true`, the engine checks every tool call against
-`require_approval_for` before executing. If `issue_binder` is requested, the run
+`require_approval_for` before executing. If `bind_policy` is requested, the run
 suspends (see Module 01 / Appendix HITL) until a human records a decision.
 
 `enabled: false` (or the field absent) means no gates fire — all tools run
-immediately. `research_subagent` has no `hitl` field at all, which defaults to
+immediately. `loss_history_analyst` has no `hitl` field at all, which defaults to
 `enabled: false`.
 
 ---
@@ -336,11 +345,16 @@ immediately. `research_subagent` has no `hitl` field at all, which defaults to
 output_schema:
   decision:
     type: string
-    enum: [approve, decline, refer]
+    enum: [bound, quote, refer, decline]
   premium:
     type: number
-  risk_score:
-    type: number
+  coverage_summary:
+    type: object
+  cope_factors:
+    type: object
+  referral_reasons:
+    type: array
+    items: {type: string}
   rationale:
     type: string
 ```
@@ -358,22 +372,23 @@ and exits the loop when the model calls it.
 
 ## The three packages compared
 
-| Field | `classify_document` (task) | `underwriting_agent` (agent) | `research_subagent` (agent) |
+| Field | `classify_document` (task) | `underwriting_agent` (agent) | `loss_history_analyst` (agent) |
 |---|---|---|---|
 | `kind` | task | agent | agent |
-| Model chain | Claude → Gemini | Claude → OpenAI → Gemini | Haiku → Gemini |
+| Model chain | Claude → Gemini | Claude → OpenAI → Gemini | Haiku → Gemini Flash |
+| `fallback_enabled` | true | true | true |
 | `max_turns` | 1 (task: forced) | 10 | 5 |
-| `max_usd` | $0.50 | $2.00 | $0.50 |
-| Tools | none | 4 (risk, policy, delegate, binder) | 1 (search via MCP) |
-| Sources | none | Postgres (applicant row) | none |
+| `max_usd` | $0.50 | $2.00 | $0.25 |
+| Tools | none | 5 (rate, appetite, property, delegate, binder) | 1 (pull_loss_runs via MCP) |
+| Sources | none | Postgres (submission row) | none |
 | Targets | S3 (optional) | S3 (optional) | none |
-| Delegations | none | research_subagent | none |
-| HITL | none | issue_binder | none |
-| `output_schema` | yes (3 fields) | yes (4 fields) | yes (2 fields) |
+| Delegations | none | loss_history_analyst | none |
+| HITL | none | bind_policy | none |
+| `output_schema` | yes (3 fields) | yes (6 fields) | yes (5 fields) |
 
-Notice that `research_subagent` is deliberately minimal — no sources, no targets,
-no HITL, one tool. It is a narrow capability scoped to one job: search and
-summarize. Governance principle: packages should declare *only* what they need.
+Notice that `loss_history_analyst` is deliberately minimal — no sources, no targets,
+no HITL, one tool. It is a narrow capability scoped to one job: pull and summarize
+claims history. Governance principle: packages should declare *only* what they need.
 
 ---
 
@@ -384,7 +399,7 @@ summarize. Governance principle: packages should declare *only* what they need.
 packages = load_packages("packages/")
 # { "classify_document": Package(...),
 #   "underwriting_agent": Package(...),
-#   "research_subagent": Package(...) }
+#   "loss_history_analyst": Package(...) }
 
 # engine.py — at run time:
 pkg = self.packages["underwriting_agent"]

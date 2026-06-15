@@ -13,24 +13,28 @@ Design rationale is in [`specs/DESIGN.md`](specs/DESIGN.md); ADR mapping in
 
 ---
 
-## Run it offline in 30 seconds (no keys, no infra)
+## Run the demos (real API keys required)
 
 ```bash
-pip install pydantic pyyaml rich          # the only deps the offline path needs
+# install deps
+pip install pydantic pyyaml rich anthropic google-genai openai
 export PYTHONPATH=$PWD
+cp .env.example .env        # fill in at least one provider key
 
 # a single-turn task with forced structured output
 python -m harness.cli demo classify
 
-# the flagship agent: Postgres source + python tool + MCP tool + delegation
-# + a HITL gate → suspend → resume, all scripted offline:
-python -m harness.cli demo underwriting --auto-approve
+# COPE underwriting: bind path (Chicago restaurant, all checks pass → HITL gate fires)
+python -m harness.cli demo underwriting_bind --auto-approve
+
+# COPE underwriting: refer path (Tampa warehouse, TIV/loss/wind checks fail → refer)
+python -m harness.cli demo underwriting_refer
 
 # step through the loop one stage at a time (great with a debugger):
-python -m harness.cli demo underwriting --step
+python -m harness.cli demo underwriting_bind --step
 ```
 
-Run the test suite (also offline):
+Run the test suite (no keys needed — uses MockProvider):
 
 ```bash
 PYTHONPATH=$PWD python tests/test_engine.py     # or: pytest -q
@@ -67,7 +71,7 @@ Enqueue and watch a worker pick it up:
 
 ```bash
 docker compose exec worker python -m harness.cli enqueue underwriting_agent \
-    --input '{"applicant_id":1,"product":"auto"}'
+    --input '{"submission_id":1}'
 ```
 
 Or run synchronously with whatever keys are set:
@@ -76,14 +80,11 @@ Or run synchronously with whatever keys are set:
 python -m harness.cli run classify_document --input '{"text":"..."}'
 ```
 
-With **no** keys set, only the mock provider is active — use `demo` or the
-notebook's scenario cells.
-
 ---
 
 ## What runs where
 
-| Capability | Offline (mock) | Live (keys/infra) |
+| Capability | Test suite (MockProvider) | Live (keys/infra) |
 |---|---|---|
 | Agentic loop, tool routing, delegation, HITL, quota | ✅ | ✅ |
 | Decision log (file, ADR-0015 layout) | ✅ | ✅ |
@@ -111,9 +112,9 @@ harness/
   mock/        context.py (one object, four gateway seams)
   worker/      worker.py (Postgres SKIP LOCKED claim loop)
   cli.py       demo · run · enqueue · worker · resume · reproduce · list-suspensions
-packages/      classify_document.task.yaml · underwriting_agent.agent.yaml · research_subagent.agent.yaml
+packages/      classify_document.task.yaml · underwriting_agent.agent.yaml · loss_history_analyst.agent.yaml
 mcp_servers/   example_server.py (FastMCP; stdio + http)
-scripts/       demo_app.py (tools) · scenarios.py (offline scripts) · smoke_test.py
+scripts/       demo_app.py (rate_property, bind_policy) · smoke_test.py
 notebooks/     walkthrough.ipynb
 docker/        Dockerfile · docker-compose.yml · initdb/01_schema.sql
 specs/         DESIGN.md · ADR-COMPATIBILITY.md · INTEGRATION.md
@@ -126,11 +127,14 @@ tests/         test_engine.py
 
 - **`classify_document`** (task) — single-turn structured classification with an
   S3 target. The minimal shape.
-- **`underwriting_agent`** (agent) — the flagship: a Postgres source, a python
-  tool, an MCP tool, delegation to `research_subagent`, a HITL gate on
-  `issue_binder`, an S3 target, and a Claude→OpenAI→Gemini fallback chain.
-- **`research_subagent`** (agent) — the delegation target; writes its own
-  decision record at depth 1.
+- **`underwriting_agent`** (agent) — the flagship: a Postgres source (COPE
+  submission row), python tools (rate_property, bind_policy), MCP tools
+  (property_data, lookup_appetite), delegation to `loss_history_analyst`, a HITL
+  gate on `bind_policy`, an S3 target, and a Claude→OpenAI→Gemini fallback chain.
+  Runs two scenarios: bind (submission 1, Chicago restaurant) and refer
+  (submission 2, Tampa warehouse).
+- **`loss_history_analyst`** (agent) — the delegation target; calls `pull_loss_runs`
+  via MCP and writes its own decision record at depth 1.
 
 ---
 

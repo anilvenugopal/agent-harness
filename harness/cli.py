@@ -2,13 +2,13 @@
 
 Subcommands:
   demo <scenario> [--step] [--auto-approve]
-        Fully OFFLINE scripted run (zero keys/infra) with the Rich tracer.
+        Live demo run using real provider API keys and real MCP tools.
+        Requires at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY.
         --step pauses after each stage so you can single-step the loop;
-        set a VSCode breakpoint in harness/core/trace.py:Tracer.emit or in any
-        gateway to stop with full neutral state in scope.
+        --auto-approve records HITL approval automatically and resumes.
 
   run <package> --input '{...}' [--step] [--no-trace]
-        LIVE run using whatever providers have API keys in the env, plus real
+        Live run using whatever providers have API keys in the env, plus real
         connectors/MCP from the env. (Falls back through the model chain.)
 
   enqueue <package> --input '{...}'      Insert a queued run into Postgres.
@@ -54,40 +54,58 @@ def _mcp_servers() -> dict:
                                "command": "python", "args": ["mcp_servers/example_server.py", "stdio"]}}
 
 
+# Demo scenario presets — (package_name, kind, input)
+_DEMO_INPUTS = {
+    "classify": (
+        "classify_document",
+        "task",
+        {"text": "I have been waiting three weeks for a callback and I am furious. Escalate this now."},
+    ),
+    "underwriting_bind": (
+        "underwriting_agent",
+        "agent",
+        {"submission_id": 1},          # Lakeview Bistro — expected to bind
+    ),
+    "underwriting_refer": (
+        "underwriting_agent",
+        "agent",
+        {"submission_id": 2},          # Gulfside Storage — expected to refer
+    ),
+}
+
+
 # ──────────────────────────────────────────────────────────────────────
-# demo (offline)
+# demo (live, real providers)
 # ──────────────────────────────────────────────────────────────────────
 async def cmd_demo(args):
-    from scripts.scenarios import SCENARIOS
     from scripts.demo_app import build_demo_tools
 
-    if args.scenario not in SCENARIOS:
-        raise SystemExit(f"unknown scenario {args.scenario!r}. Known: {sorted(SCENARIOS)}")
-    pkg_name, kind, inp, turns, mock = SCENARIOS[args.scenario]()
+    if args.scenario not in _DEMO_INPUTS:
+        raise SystemExit(f"unknown scenario {args.scenario!r}. Known: {sorted(_DEMO_INPUTS)}")
+    pkg_name, kind, inp = _DEMO_INPUTS[args.scenario]
 
-    packages = load_packages(PACKAGE_DIR)
-    # Offline: one shared MockProvider serves EVERY chain link (so the call
-    # counter is shared across providers and across delegated sub-agents). The
-    # package's real provider names (anthropic/openai/gemini) are aliased to it,
-    # so the chain resolves link 0 to the mock without rewriting the package.
-    shared_mock = MockProvider(turns=turns)
-    providers = {name: shared_mock for name in ("anthropic", "openai", "gemini", "mock")}
-    engine = ExecutionEngine(
-        chain=ModelChain(providers),
-        tool_gateway=ToolGateway(python_tools=build_demo_tools()),
-        binder=Binder(ConnectorRegistry()),     # connectors mocked via MockContext
-        packages=packages,
+    packages  = load_packages(PACKAGE_DIR)
+    providers = build_providers()
+    if not any(k != "mock" for k in providers):
+        raise SystemExit(
+            "demo requires at least one real provider API key.\n"
+            "  Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY."
+        )
+
+    engine = build_engine(
+        packages=packages, providers=providers, connectors=build_connectors(),
+        python_tools=build_demo_tools(), mcp_client=MCPClient(_mcp_servers()),
         sink=FileSink(ARTIFACTS),
         continuation_store=FileContinuationStore(f"{ARTIFACTS}/suspensions"),
         tracer=Tracer(enabled=True, step=args.step),
     )
 
-    from harness.core.result import HITLSuspended, RunStatus
+    from harness.core.result import HITLSuspended
     try:
         if kind == "task":
-            res = await engine.run_task(task_name=pkg_name, input_data=inp, mock=mock)
+            res = await engine.run_task(task_name=pkg_name, input_data=inp)
         else:
-            res = await engine.run_agent(agent_name=pkg_name, context=inp, mock=mock)
+            res = await engine.run_agent(agent_name=pkg_name, context=inp)
         _print_result(res)
     except HITLSuspended as s:
         print(f"\n⏸  SUSPENDED for human approval: gate={s.gate_tool!r} suspension={s.suspension_id}")
@@ -99,6 +117,9 @@ async def cmd_demo(args):
             _print_result(res)
         else:
             print(f"   resume with: python -m harness.cli resume {s.suspension_id} --decision approve")
+    finally:
+        if engine.tools.mcp_client:
+            await engine.tools.mcp_client.close_all()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -252,8 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="harness", description="Multi-provider agent harness")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    d = sub.add_parser("demo", help="offline scripted run (no keys/infra)")
-    d.add_argument("scenario", help="classify | underwriting")
+    d = sub.add_parser("demo", help="live demo run (requires at least one provider API key)")
+    d.add_argument("scenario", help="classify | underwriting_bind | underwriting_refer")
     d.add_argument("--step", action="store_true", help="pause after each stage")
     d.add_argument("--auto-approve", action="store_true", help="auto-approve HITL gates and resume")
     d.set_defaults(fn=cmd_demo)
