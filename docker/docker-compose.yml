@@ -1,0 +1,99 @@
+# Docker Compose — the full local harness stack.
+#
+#   postgres    : run queue (SKIP LOCKED dispatch) + optional decision sink + demo applicant data
+#   minio       : S3-compatible object store (the S3 connector + ADR-0015 artifact store)
+#   mcp-server  : example MCP server over Streamable HTTP (Category A tools)
+#   worker      : the harness in worker mode, claiming runs off Postgres
+#   jupyter     : JupyterLab for step-through exploration (the notebook walkthrough)
+#
+# Bring it up:    docker compose --env-file .env up --build
+# Enqueue a run:  docker compose exec worker python -m harness.cli enqueue underwriting_agent --input '{"applicant_id":1,"product":"auto"}'
+# Open Jupyter:   http://localhost:8888  (token in the jupyter logs)
+#
+# OFFLINE: with no API keys set, only the mock provider is active — use the
+# notebook's scenario cells (or `harness.cli demo`) which run fully scripted.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: harness
+      POSTGRES_PASSWORD: harness
+      POSTGRES_DB: harness
+    ports: ["5432:5432"]
+    volumes:
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harness"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["9000:9000", "9001:9001"]
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  mcp-server:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    command: ["python", "mcp_servers/example_server.py", "http"]
+    ports: ["9100:9000"]
+
+  worker:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      PG_MAIN_DSN: "postgresql://harness:harness@postgres:5432/harness"
+      # Decision sink: file (default) under /app/_artifacts, or set to postgres.
+      DECISION_SINK: "file"
+      ARTIFACTS_ROOT: "/app/_artifacts"
+      # S3 connector → MinIO
+      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      # MCP policy_service over Streamable HTTP
+      MCP_POLICY_URL: "http://mcp-server:9000/mcp"
+      # Provider keys (optional — leave blank to run mock-only)
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    volumes:
+      - ../_artifacts:/app/_artifacts
+
+  jupyter:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token="]
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    ports: ["8888:8888"]
+    environment:
+      PG_MAIN_DSN: "postgresql://harness:harness@postgres:5432/harness"
+      ARTIFACTS_ROOT: "/app/_artifacts"
+      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      MCP_POLICY_URL: "http://mcp-server:9000/mcp"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ../_artifacts:/app/_artifacts
+
+volumes:
+  pgdata:
+  miniodata:

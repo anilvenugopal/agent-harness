@@ -1,0 +1,123 @@
+# underwriting_agent — an AGENT package (unsigned YAML analog of a .vax artifact).
+#
+# The flagship example. Exercises every engine capability in one run:
+#   - a Postgres SOURCE (pull the applicant record into context)
+#   - a python in-process TOOL (calculate_risk_score)
+#   - an MCP TOOL over Streamable HTTP (lookup_policy, from the example server)
+#   - DELEGATION to research_subagent (governed sub-agent)
+#   - a HITL GATE on issue_binder (human must approve before a binder is issued)
+#   - an S3 TARGET (write the underwriting decision)
+#   - a fallback model CHAIN (Claude → OpenAI → Gemini)
+#   - forced structured output via submit_output
+
+name: underwriting_agent
+kind: agent
+version: v1
+description: Underwrite an insurance application end to end.
+
+system_prompt: |
+  You are an insurance underwriting agent. You will be given an applicant.
+  Steps: (1) pull supporting research by delegating to the researcher,
+  (2) look up the applicable policy rules via the policy tool, (3) compute a
+  risk score, (4) if issuing a binder, call issue_binder (this requires human
+  approval), then (5) call submit_output with your final decision.
+
+prompt_template: |
+  Underwrite this application:
+  applicant_id: {{input.applicant_id}}
+  product: {{input.product}}
+
+  Applicant record from system of record:
+  {{context.applicant}}
+
+inference:
+  chain:
+    - provider: anthropic
+      model: claude-opus-4-8
+      priority: 0
+      max_tokens: 2048
+    - provider: openai
+      model: gpt-5.1
+      priority: 1
+      max_tokens: 2048
+    - provider: gemini
+      model: gemini-3-pro
+      priority: 2
+      max_tokens: 2048
+  max_turns: 10
+  max_usd: 2.00
+
+sources:
+  - connector: pg_main
+    method: query
+    ref: "SELECT id, name, age, risk_band, prior_claims FROM applicant WHERE id = {{input.applicant_id}}"
+    bind_to: applicant
+    required: true
+
+tools:
+  - name: calculate_risk_score
+    description: Compute a 0-100 risk score from applicant attributes.
+    transport: python_inprocess
+    input_schema:
+      type: object
+      properties:
+        age: {type: integer}
+        risk_band: {type: string}
+        prior_claims: {type: integer}
+      required: [age, risk_band, prior_claims]
+
+  - name: lookup_policy
+    description: Look up underwriting rules for a product from the policy service.
+    transport: mcp_http
+    mcp_server: policy_service
+    mcp_tool_name: lookup_policy
+    input_schema:
+      type: object
+      properties:
+        product: {type: string}
+      required: [product]
+
+  - name: delegate_to_agent
+    description: Delegate a research task to a registered sub-agent.
+    transport: verity_builtin
+    input_schema:
+      type: object
+      properties:
+        agent_name: {type: string}
+        context: {type: object}
+      required: [agent_name, context]
+
+  - name: issue_binder
+    description: Issue an insurance binder (HUMAN APPROVAL REQUIRED).
+    transport: python_inprocess
+    input_schema:
+      type: object
+      properties:
+        applicant_id: {type: integer}
+        premium: {type: number}
+      required: [applicant_id, premium]
+
+delegations:
+  - child_agent: research_subagent
+
+hitl:
+  enabled: true
+  require_approval_for: [issue_binder]
+
+targets:
+  - connector: s3_main
+    method: put_object
+    from_path: "$"
+    container: "underwriting/{{run_id}}.json"
+    required: false
+
+output_schema:
+  decision:
+    type: string
+    enum: [approve, decline, refer]
+  premium:
+    type: number
+  risk_score:
+    type: number
+  rationale:
+    type: string

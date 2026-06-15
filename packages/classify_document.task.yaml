@@ -1,0 +1,51 @@
+# classify_document — a TASK package (unsigned YAML analog of a .vtx artifact).
+#
+# A single-turn structured transform: read a document, emit a classification.
+# Demonstrates: forced structured output (output_schema) + an S3 target write
+# (suppressed in the offline demo via MockContext.suppress_targets).
+
+name: classify_document
+kind: task
+version: v1
+description: Classify an incoming document into a governance category.
+
+system_prompt: |
+  You are a document triage classifier for an insurance governance platform.
+  Read the document text and return a single best category with a confidence
+  score and a one-sentence rationale. Categories: claim, policy, complaint,
+  marketing, other.
+
+prompt_template: |
+  Classify the following document.
+
+  ---
+  {{input.text}}
+  ---
+
+inference:
+  chain:
+    - provider: anthropic
+      model: claude-opus-4-8
+      priority: 0
+      max_tokens: 1024
+    - provider: gemini
+      model: gemini-2.5-flash
+      priority: 1
+  max_turns: 1
+  max_usd: 0.50
+
+output_schema:
+  category:
+    type: string
+    enum: [claim, policy, complaint, marketing, other]
+  confidence:
+    type: number
+  rationale:
+    type: string
+
+targets:
+  - connector: s3_main
+    method: put_object
+    from_path: "$"
+    container: "classifications/{{run_id}}.json"
+    required: false
