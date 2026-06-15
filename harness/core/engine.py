@@ -72,6 +72,7 @@ class ExecutionEngine:
         continuation_store: Optional[ContinuationStore] = None,
         application: str = "harness",
         tracer: Optional[Tracer] = None,
+        global_fallback_enabled: bool = True,
     ):
         self.chain = chain
         self.tools = tool_gateway
@@ -81,6 +82,7 @@ class ExecutionEngine:
         self.continuations = continuation_store or FileContinuationStore()
         self.application = application
         self.tracer = tracer or Tracer(enabled=False)
+        self.global_fallback_enabled = global_fallback_enabled
         # let the gateway route delegate_to_agent back into the engine
         self.tools.delegate_fn = self._delegate
 
@@ -458,7 +460,22 @@ class ExecutionEngine:
         return await self.chain.complete(
             chain=pkg.inference.chain, system=system, messages=messages,
             tools=tools or None, force_tool=force_tool, on_event=on_event,
+            fallback_enabled=self._effective_fallback(pkg),
         )
+
+    def _effective_fallback(self, pkg: Package) -> bool:
+        """Resolve the two-tier fallback rule.
+
+        Global OFF  → no fallback regardless of package setting.
+        Global ON + package unset  → no fallback (explicit opt-in required).
+        Global ON + package True   → fall through the chain on exhausted retries.
+        Global ON + package False  → primary-only (package explicitly disables).
+        """
+        if not self.global_fallback_enabled:
+            return False
+        if pkg.inference.fallback_enabled is None:
+            return False
+        return pkg.inference.fallback_enabled
 
     # ──────────────────────────────────────────────────────────────
     # helpers

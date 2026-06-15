@@ -64,6 +64,11 @@ class InferenceConfig(BaseModel):
     max_turns: int = 10
     max_total_tokens: Optional[int] = None
     max_usd: Optional[float] = None
+    # Per-package fallback control. None = inherit the global default (no fallback).
+    # True = fall through to the next chain link after retries are exhausted.
+    # False = fail immediately on the primary link without trying others.
+    # Only takes effect when the global HARNESS_FALLBACK_ENABLED env var is true.
+    fallback_enabled: Optional[bool] = None
 
     def ordered(self) -> list[ModelRef]:
         return sorted(self.chain, key=lambda m: m.priority)

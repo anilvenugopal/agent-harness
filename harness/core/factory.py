@@ -106,6 +106,7 @@ def build_engine(
     continuation_store: Optional[ContinuationStore] = None,
     tracer: Optional[Tracer] = None,
     application: str = "harness",
+    global_fallback_enabled: bool = True,
 ) -> ExecutionEngine:
     chain = ModelChain(providers)
     gateway = ToolGateway(
@@ -115,7 +116,8 @@ def build_engine(
     binder = Binder(connectors or ConnectorRegistry())
     return ExecutionEngine(
         chain=chain, tool_gateway=gateway, binder=binder, packages=packages,
-        sink=sink, continuation_store=continuation_store, tracer=tracer, application=application,
+        sink=sink, continuation_store=continuation_store, tracer=tracer,
+        application=application, global_fallback_enabled=global_fallback_enabled,
     )
 
 
@@ -136,6 +138,8 @@ def build_default_engine(
     sink: DecisionSink = (PostgresSink(os.environ["DECISION_PG_DSN"])
                           if os.environ.get("DECISION_SINK") == "postgres" and os.environ.get("DECISION_PG_DSN")
                           else FileSink(artifacts_root))
+    fallback_raw = os.environ.get("HARNESS_FALLBACK_ENABLED", "true").strip().lower()
+    global_fallback_enabled = fallback_raw not in ("false", "0", "no")
     return build_engine(
         packages=packages, providers=providers, connectors=connectors,
         python_tools=python_tools or PythonToolRegistry(),
@@ -143,6 +147,7 @@ def build_default_engine(
         sink=sink,
         continuation_store=FileContinuationStore(f"{artifacts_root}/suspensions"),
         tracer=Tracer(enabled=trace, step=step),
+        global_fallback_enabled=global_fallback_enabled,
     )
 
 

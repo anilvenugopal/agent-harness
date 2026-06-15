@@ -23,6 +23,7 @@ prompt_template: |
   ---
 
 inference:
+  fallback_enabled: true
   chain:
     - provider: anthropic
       model: claude-opus-4-8

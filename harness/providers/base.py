@@ -101,8 +101,11 @@ class ModelChain:
         tools: Optional[list[ToolDef]] = None,
         force_tool: Optional[str] = None,
         on_event=None,
+        fallback_enabled: bool = False,
     ) -> ModelResponse:
         ordered = sorted(chain, key=lambda m: m.priority)
+        if not fallback_enabled:
+            ordered = ordered[:1]   # only the primary link; fail-fast, no chain traversal
         last_error: Optional[Exception] = None
 
         for link in ordered:

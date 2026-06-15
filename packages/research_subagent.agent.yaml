@@ -20,6 +20,7 @@ prompt_template: |
   Gather the most relevant facts and summarise.
 
 inference:
+  fallback_enabled: true
   chain:
     - provider: anthropic
       model: claude-haiku-4-5
