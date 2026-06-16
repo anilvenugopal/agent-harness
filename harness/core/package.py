@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import enum
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field
@@ -121,6 +121,11 @@ class SourceBinding(BaseModel):
     ref: Any                       # query / key / path; may contain {{input.x}} templates
     bind_to: str                   # context key the resolved value is placed under
     required: bool = True
+    # When set, the connector must return raw bytes (use method: get_bytes). The
+    # binder wraps them as a block-metadata dict; the engine turns them into an
+    # ImageBlock or DocumentBlock appended to the first user message instead of
+    # rendering them into the prompt template as text.
+    as_block: Optional[Literal["image", "document"]] = None
 
 
 class TargetBinding(BaseModel):

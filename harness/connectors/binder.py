@@ -22,7 +22,9 @@ exactly what was read and written — or suppressed.
 
 from __future__ import annotations
 
+import base64
 import logging
+import mimetypes
 import re
 from typing import Any, Optional
 
@@ -96,8 +98,22 @@ class Binder:
                 ref = _template(src.ref, scope)
                 connector = self.connectors.get(src.connector)
                 value = await connector.fetch(src.method, ref)
-                context[src.bind_to] = value
-                audit.append(_src_audit(src, value, mocked=False))
+                if src.as_block and isinstance(value, bytes):
+                    # Wrap bytes in a block-metadata dict so the engine can
+                    # build an ImageBlock/DocumentBlock for the first user message.
+                    # The dict is JSON-serialisable (data_b64 is a str).
+                    mime, _ = mimetypes.guess_type(ref)
+                    stored: dict = {
+                        "_as_block": src.as_block,
+                        "_media_type": mime or "application/octet-stream",
+                        "_data_b64": base64.b64encode(value).decode(),
+                        "_title": src.bind_to,
+                    }
+                    context[src.bind_to] = stored
+                    audit.append(_src_audit(src, f"<{src.as_block}: {mime or 'unknown'}, {len(value)} bytes>", mocked=False))
+                else:
+                    context[src.bind_to] = value
+                    audit.append(_src_audit(src, value, mocked=False))
             except Exception as e:
                 logger.warning("source resolution failed: %s (%s)", src.bind_to, e)
                 audit.append(_src_audit(src, None, mocked=False, error=str(e)))

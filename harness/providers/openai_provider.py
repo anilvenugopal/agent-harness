@@ -25,7 +25,7 @@ import json
 from typing import Optional
 
 from harness.core.ir import (
-    Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
+    DocumentBlock, ImageBlock, Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
     ToolDef, ToolResultBlock, ToolUseBlock, Usage,
 )
 from harness.core.package import ModelRef
@@ -116,20 +116,45 @@ class OpenAIProvider:
 
 
 def _to_input_items(messages: list[Message]) -> list[dict]:
+    import base64
+    import logging as _log
+    _logger = _log.getLogger("harness.providers.openai")
     items: list[dict] = []
     for m in messages:
-        text_parts, tool_uses, tool_results = [], [], []
+        text_parts, image_blocks, tool_uses, tool_results = [], [], [], []
         for b in m.content:
             if isinstance(b, TextBlock):
                 text_parts.append(b.text)
+            elif isinstance(b, ImageBlock):
+                image_blocks.append(b)
+            elif isinstance(b, DocumentBlock):
+                # OpenAI Responses API has no inline PDF support; degrade to text.
+                if b.media_type.startswith("text/"):
+                    text = base64.b64decode(b.data_b64).decode("utf-8", errors="replace")
+                    label = b.title or "document"
+                    text_parts.append(f"[{label}]\n{text}")
+                else:
+                    _logger.warning("OpenAI does not support inline %s documents; skipping block", b.media_type)
             elif isinstance(b, ToolUseBlock):
                 tool_uses.append(b)
             elif isinstance(b, ToolResultBlock):
                 tool_results.append(b)
             # ThinkingBlock dropped on outbound
-        if text_parts:
-            items.append({"role": "assistant" if m.role == "assistant" else "user",
-                          "content": "\n".join(text_parts)})
+        role = "assistant" if m.role == "assistant" else "user"
+        if text_parts or image_blocks:
+            if image_blocks:
+                # Vision: use array content format.
+                content_parts: list = []
+                if text_parts:
+                    content_parts.append({"type": "input_text", "text": "\n".join(text_parts)})
+                for img in image_blocks:
+                    content_parts.append({
+                        "type": "input_image",
+                        "image_url": f"data:{img.media_type};base64,{img.data_b64}",
+                    })
+                items.append({"role": role, "content": content_parts})
+            else:
+                items.append({"role": role, "content": "\n".join(text_parts)})
         for tu in tool_uses:
             items.append({"type": "function_call", "call_id": tu.id, "name": tu.name,
                           "arguments": json.dumps(tu.input, default=str)})

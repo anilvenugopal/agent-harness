@@ -244,6 +244,7 @@ uses it to know what arguments to provide.
 
 ### `sources` — data pulled in before the loop
 
+**Text source (Postgres row → prompt template):**
 ```yaml
 sources:
   - connector: pg_main
@@ -259,7 +260,33 @@ Sources are resolved **before** the first model turn. The binder:
 3. Places the result under `context["submission"]`
 4. The prompt template then renders `{{context.submission}}` into the user message
 
-If `required: true` and the source fails (connector missing, query error), the
+**Binary source (S3 object → model content block):**
+```yaml
+sources:
+  - connector: s3_main
+    method: get_bytes
+    ref: "{{input.document_key}}"
+    bind_to: document
+    as_block: document        # "image" | "document"
+    required: true
+```
+
+When `as_block` is set, the connector returns raw bytes instead of text. The
+binder wraps them in a block-metadata dict; the engine appends an `ImageBlock`
+or `DocumentBlock` to the first user message rather than inserting text into
+the prompt template. Provider adapters translate these to native wire formats:
+
+| Provider | image | document (PDF) | document (text/*) |
+|---|---|---|---|
+| Anthropic | `{type:image, source:{type:base64}}` | `{type:document, source:{type:base64}}` | `{type:document, source:{type:text}}` |
+| OpenAI | `{type:input_image, image_url:data:...}` | not supported (degraded to text) | text prepended to message |
+| Gemini | `Part(inline_data=Blob(...))` | `Part(inline_data=Blob(...))` | `Part(inline_data=Blob(...))` |
+
+`ImageBlock` and `DocumentBlock` are stored in the IR as base64 strings (not
+raw bytes) so they round-trip through the decision log and HITL continuation
+store without custom JSON encoders.
+
+If `required: true` and the source fails (connector missing, object not found), the
 run fails immediately with a `SourceResolutionError` — no model call is made.
 
 If `required: false`, the failure is logged in the decision record as an audit
@@ -380,7 +407,7 @@ and exits the loop when the model calls it.
 | `max_turns` | 1 (task: forced) | 10 | 5 |
 | `max_usd` | $0.50 | $2.00 | $0.25 |
 | Tools | none | 5 (rate, appetite, property, delegate, binder) | 1 (pull_loss_runs via MCP) |
-| Sources | none | Postgres (submission row) | none |
+| Sources | S3 (`as_block: document`) | Postgres (submission row) | none |
 | Targets | S3 (optional) | S3 (optional) | none |
 | Delegations | none | loss_history_analyst | none |
 | HITL | none | bind_policy | none |

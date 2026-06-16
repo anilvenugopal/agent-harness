@@ -22,7 +22,7 @@ import json
 from typing import Optional
 
 from harness.core.ir import (
-    Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
+    DocumentBlock, ImageBlock, Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
     ToolDef, ToolResultBlock, ToolUseBlock, Usage,
 )
 from harness.core.package import ModelRef
@@ -118,11 +118,22 @@ def _id_name_map(messages: list[Message]) -> dict[str, str]:
 
 
 def _to_content(types, m: Message, id_to_name: dict[str, str]):
+    import base64
     role = "model" if m.role == "assistant" else "user"
     parts = []
     for b in m.content:
         if isinstance(b, TextBlock):
             parts.append(types.Part(text=b.text))
+        elif isinstance(b, ImageBlock):
+            parts.append(types.Part(inline_data=types.Blob(
+                mime_type=b.media_type,
+                data=base64.b64decode(b.data_b64),
+            )))
+        elif isinstance(b, DocumentBlock):
+            parts.append(types.Part(inline_data=types.Blob(
+                mime_type=b.media_type,
+                data=base64.b64decode(b.data_b64),
+            )))
         elif isinstance(b, ToolUseBlock):
             parts.append(types.Part(function_call=types.FunctionCall(name=b.name, args=b.input)))
         elif isinstance(b, ToolResultBlock):

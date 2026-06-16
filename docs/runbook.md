@@ -65,18 +65,22 @@ uv pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `.env` and fill in your keys:
+Open `.env` and fill in your keys. The CLI loads this file automatically — no
+`source .env` required:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-api03-...
 GEMINI_API_KEY=AIza...
-OPENAI_API_KEY=sk-proj-...      # optional
+OPENAI_API_KEY=sk-proj-...          # optional
 
-# Leave these commented unless running Docker:
-# PG_MAIN_DSN=postgresql://harness:harness@localhost:5432/harness
-# DECISION_SINK=file
-# S3_ENDPOINT_URL=http://localhost:9000
-# S3_ACCESS_KEY=minioadmin
-# S3_SECRET_KEY=minioadmin
+# For classify demo (MinIO document source):
+S3_ENDPOINT_URL=http://localhost:9000
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
+
+# For underwriting demo (Postgres submission source):
+# PG_MAIN_DSN=postgresql://harness:harness@localhost:5433/harness
+
+# MCP policy service — uncomment when using Docker stack:
 # MCP_POLICY_URL=http://localhost:9100/mcp
 ```
 
@@ -138,8 +142,12 @@ agent-harness/
 │   ├── underwriting_agent.agent.yaml
 │   └── loss_history_analyst.agent.yaml
 │
+├── samples/
+│   └── complaint.txt           Sample customer complaint uploaded to MinIO by seed_demo.py
+│
 ├── scripts/
-│   └── demo_app.py             Python tool implementations (rate_property, bind_policy)
+│   ├── demo_app.py             Python tool implementations (rate_property, bind_policy)
+│   └── seed_demo.py            One-time MinIO seed: uploads samples/ to the documents bucket
 │
 ├── mcp_servers/
 │   └── example_server.py       FastMCP server — exposes property_data, lookup_appetite, pull_loss_runs
@@ -169,7 +177,7 @@ agent-harness/
   │                                                                 │
   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
   │  │   postgres   │  │    minio     │  │     mcp-server       │  │
-  │  │  port: 5432  │  │  port: 9000  │  │  port: 9100 → 9000   │  │
+  │  │  port: 5433  │  │  port: 9000  │  │  port: 9100 → 9000   │  │
   │  │              │  │  UI:   9001  │  │                      │  │
   │  │  3 tables:   │  │              │  │  FastMCP server      │  │
   │  │  - execution_│  │  S3-compat.  │  │  Tools:              │  │
@@ -211,7 +219,7 @@ agent-harness/
 
 | Service | Host port | What's there |
 |---|---|---|
-| postgres | 5432 | Postgres DB (user: harness, pass: harness, db: harness) |
+| postgres | 5433 | Postgres DB (user: harness, pass: harness, db: harness) |
 | minio | 9000 | S3 API endpoint |
 | minio | 9001 | MinIO web console (minioadmin / minioadmin) |
 | mcp-server | 9100 | MCP Streamable HTTP (`/mcp` path) |
@@ -360,7 +368,7 @@ cat _artifacts/runs/2026/06/15/<run-id>/decision_log.json | python3 -m json.tool
   "execution_run_id": "...",         ← matches the Postgres execution_run.id
   "parent_decision_id": null,        ← set for sub-agents (delegation depth > 0)
   "decision_depth": 0,               ← 0=top-level, 1=first sub-agent, etc.
-  "input_json": { "text": "..." },
+  "input_json": { "document_key": "documents/complaint.txt" },
   "output_json": { "category": "complaint", "confidence": 0.82, "rationale": "..." },
   "model_chain": [ ... ],            ← full chain configured (all providers, all priorities)
   "models_used": ["claude-opus-4-8"], ← which model(s) actually responded
@@ -416,7 +424,7 @@ SERVICE      STATUS                   PORTS
 jupyter      Up N minutes             0.0.0.0:8888->8888/tcp
 mcp-server   Up N minutes             0.0.0.0:9100->9000/tcp
 minio        Up N minutes (healthy)   0.0.0.0:9000-9001->9000-9001/tcp
-postgres     Up N minutes (healthy)   0.0.0.0:5432->5432/tcp
+postgres     Up N minutes (healthy)   0.0.0.0:5433->5432/tcp
 worker       Up N minutes
 ```
 
@@ -452,14 +460,19 @@ All demos use **real provider API keys**. At least one of `ANTHROPIC_API_KEY`,
 
 ### What are these demos?
 
-**`classify`** — A document triage task. A company receives hundreds of customer
-messages per day: complaints, questions, billing issues. This task reads a text
-string and returns a category, confidence score, and rationale. One model turn,
-no tools, no external data.
+**`classify`** — A document triage task. Fetches a real document from MinIO as a
+binary block, attaches it natively to the model (Anthropic `document` block,
+Gemini `inline_data`), and returns a structured classification. One model turn,
+no tools.
+
+Requires MinIO running and the document seeded:
+```bash
+python scripts/seed_demo.py     # uploads samples/complaint.txt → MinIO documents/complaint.txt
+```
 
 ```
-Input:  text = "I have been waiting three weeks for a callback and I am furious."
-Output: { category: "complaint", confidence: 0.88, rationale: "..." }
+Input:  { "document_key": "documents/complaint.txt" }
+Output: { category: "complaint", confidence: 0.95, rationale: "..." }
 ```
 
 ---
@@ -495,15 +508,20 @@ Output: { decision: "refer", referral_reasons: [...], premium: 62726, ... }
 
 ### Demo commands
 
-Set the PYTHONPATH and load your keys, then:
+Set the PYTHONPATH (keys are loaded from `.env` automatically):
 
 ```bash
 export PYTHONPATH=/path/to/agent-harness
-set -a && source .env && set +a
 ```
 
 #### Scenario 1: classify
 
+Seed once (MinIO must be running):
+```bash
+python scripts/seed_demo.py
+```
+
+Then:
 ```bash
 .venv/bin/python -m harness.cli demo classify
 ```
@@ -584,16 +602,18 @@ Pauses after each trace event and waits for Enter. Set a breakpoint in
 ### Live run via CLI (any package, any input)
 
 ```bash
-set -a && source .env && set +a
+# classify_document reads a document from MinIO — seed first if not done:
+python scripts/seed_demo.py
+
 PYTHONPATH=. .venv/bin/python -m harness.cli run classify_document \
-    --input '{"text": "My shipment arrived damaged and I want a full refund immediately."}'
+    --input '{"document_key": "documents/complaint.txt"}'
 ```
 
 Force Gemini fallback by unsetting the Anthropic key:
 
 ```bash
 ANTHROPIC_API_KEY="" PYTHONPATH=. .venv/bin/python -m harness.cli run classify_document \
-    --input '{"text": "My shipment arrived damaged and I want a full refund immediately."}'
+    --input '{"document_key": "documents/complaint.txt"}'
 ```
 
 ### Live agent via worker queue (Docker required)
@@ -722,17 +742,17 @@ and continues with the remaining providers. This is not an error — install wit
 ## 12. Quick Reference Card
 
 ```
-DEMO COMMANDS (real API keys required)
-  demo classify                         → task: classify a complaint text
+DEMO COMMANDS (real API keys required; .env loaded automatically)
+  demo classify                         → task: fetch document from MinIO, classify it
   demo underwriting_bind --auto-approve → bind path: COPE rating, HITL, auto-approve
   demo underwriting_bind --step         → same, pause after each stage
   demo underwriting_bind                → suspend at bind_policy; resume manually
   demo underwriting_refer               → refer path: frame warehouse, no HITL gate
 
-LIVE RUNS (keys in .env, no Docker needed)
-  run classify_document --input '{"text":"..."}'   → real Claude
-  ANTHROPIC_API_KEY="" run classify_document ...   → force Gemini fallback
-  reproduce <run-id>                               → audit replay (no API call)
+LIVE RUNS (keys in .env loaded automatically)
+  run classify_document --input '{"document_key":"documents/complaint.txt"}'  → real Claude
+  ANTHROPIC_API_KEY="" run classify_document ...                               → force Gemini
+  reproduce <run-id>                                                           → audit replay
 
 WORKER MODE (Docker stack required)
   enqueue underwriting_agent --input '{"submission_id":1}'   → bind path

@@ -20,7 +20,7 @@ services:
       POSTGRES_USER: harness
       POSTGRES_PASSWORD: harness
       POSTGRES_DB: harness
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]
     volumes:
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data

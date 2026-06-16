@@ -83,7 +83,34 @@ class ToolResultBlock(BaseModel):
     is_error: bool = False
 
 
-ContentBlock = Union[TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock]
+class ImageBlock(BaseModel):
+    """An inline image sent as part of a user message.
+
+    `data_b64` holds the raw image bytes base64-encoded. Storing as str rather
+    than bytes keeps every block JSON-serialisable so messages round-trip through
+    the decision log and HITL continuation store with no custom encoders.
+    Supported media types: image/jpeg, image/png, image/gif, image/webp.
+    """
+    type: Literal["image"] = "image"
+    media_type: str    # "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+    data_b64: str      # base64-encoded raw bytes, no data: prefix
+    title: Optional[str] = None
+
+
+class DocumentBlock(BaseModel):
+    """A document (PDF or plain text) sent as part of a user message.
+
+    `data_b64` holds the file bytes base64-encoded. For text/* media types
+    provider adapters decode to UTF-8 before sending. For application/pdf
+    Anthropic and Gemini accept the base64 directly; OpenAI degrades to text.
+    """
+    type: Literal["document"] = "document"
+    media_type: str    # "application/pdf" | "text/plain" | "text/markdown" | ...
+    data_b64: str      # base64-encoded raw bytes
+    title: Optional[str] = None
+
+
+ContentBlock = Union[TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock, ImageBlock, DocumentBlock]
 
 
 class Message(BaseModel):
@@ -189,6 +216,7 @@ class ModelResponse(BaseModel):
 
 __all__ = [
     "TextBlock", "ThinkingBlock", "ToolUseBlock", "ToolResultBlock",
+    "ImageBlock", "DocumentBlock",
     "ContentBlock", "Message", "ToolDef",
     "StopReason", "Usage", "ModelResponse",
 ]

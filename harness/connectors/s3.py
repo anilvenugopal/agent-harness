@@ -62,15 +62,17 @@ class S3Connector:
         client = self._ensure_client()
         bucket, key = self._split(ref if isinstance(ref, str) else ref["container"])
 
-        def _get():
+        def _get() -> bytes:
             obj = client.get_object(Bucket=bucket, Key=key)
-            return obj["Body"].read().decode("utf-8")
+            return obj["Body"].read()
 
-        body = await asyncio.to_thread(_get)
+        raw: bytes = await asyncio.to_thread(_get)
         if method == "get_object":
-            return body
+            return raw.decode("utf-8")
+        if method == "get_bytes":
+            return raw          # caller receives raw bytes for image/document blocks
         if method == "get_json":
-            return json.loads(body)
+            return json.loads(raw.decode("utf-8"))
         raise ConnectorMethodError(f"s3 connector has no fetch method {method!r}")
 
     async def write(self, method: str, container: str | None, payload: Any) -> Any:

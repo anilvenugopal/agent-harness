@@ -109,10 +109,24 @@ keeps every vendor SDK out of the loop. The cost is three translation layers
 (the adapters); the benefit is that adding a provider or a fallback never
 touches the loop.
 
-Messages carry **typed content blocks** (`TextBlock`, `ThinkingBlock`,
-`ToolUseBlock`, `ToolResultBlock`) rather than flat strings, because all three
-providers return structured content and a flat string loses the tool
-correlation that replay depends on.
+Messages carry **typed content blocks** rather than flat strings, because all
+three providers return structured content and a flat string loses the tool
+correlation that replay depends on:
+
+| Block | Direction | Purpose |
+|---|---|---|
+| `TextBlock` | both | model text or user text |
+| `ThinkingBlock` | inbound only | extended reasoning; dropped on outbound (provider-private) |
+| `ToolUseBlock` | inbound | model's tool call request |
+| `ToolResultBlock` | outbound | result of executing a tool |
+| `ImageBlock` | outbound (first user msg) | inline image from a binary source binding |
+| `DocumentBlock` | outbound (first user msg) | PDF or text document from a binary source binding |
+
+`ImageBlock` and `DocumentBlock` carry their bytes as base64 strings (`data_b64`)
+so they are JSON-serialisable and round-trip through the decision log and HITL
+continuation store without custom encoders. Provider adapters translate them to
+each vendor's wire format (Anthropic document/image source, OpenAI input_image,
+Gemini inline_data Blob).
 
 ---
 
@@ -306,29 +320,33 @@ sequenceDiagram
     participant E as Engine
     participant SRC as Source(PG)
     participant M as Model chain
-    participant SUB as Sub-agent
-    participant MCP as MCP(policy)
+    participant SUB as loss_history_analyst
+    participant MCP as MCP(policy_service)
     participant H as HITL store
     participant TGT as Target(S3)
-    W->>E: run_agent(underwriting, {applicant_id})
-    E->>SRC: resolve applicant (mock/live)
+    W->>E: run_agent(underwriting_agent, {submission_id})
+    E->>SRC: resolve submission row (mock/live)
     E->>M: turn 0
-    M-->>E: tool_use delegate_to_agent
-    E->>SUB: run_agent(research, depth=1)
-    SUB-->>E: {findings}  (own decision record)
+    M-->>E: tool_use delegate_to_agent → loss_history_analyst
+    E->>SUB: run_agent(loss_history_analyst, depth=1)
+    SUB->>MCP: pull_loss_runs(named_insured)
+    SUB-->>E: {loss_count, loss_ratio, ...}  (own decision record)
     E->>M: turn 1
-    M-->>E: tool_use lookup_policy
-    E->>MCP: call_tool(lookup_policy)
+    M-->>E: tool_use lookup_appetite
+    E->>MCP: call_tool(lookup_appetite)
     E->>M: turn 2
-    M-->>E: tool_use calculate_risk_score (python)
+    M-->>E: tool_use property_data
+    E->>MCP: call_tool(property_data)
     E->>M: turn 3
-    M-->>E: tool_use issue_binder  ⟵ HITL gate
+    M-->>E: tool_use rate_property (python)
+    E->>M: turn 4
+    M-->>E: tool_use bind_policy  ⟵ HITL gate
     E->>H: save Continuation; raise HITLSuspended
     E-->>W: SUSPENDED
-    Note over W,H: human approves out of band
+    Note over W,H: underwriter approves out of band
     W->>E: resume(suspension_id)
-    E->>M: turn 4
-    M-->>E: submit_output {decision}
+    E->>M: turn 5
+    M-->>E: submit_output {decision, premium, ...}
     E->>TGT: write decision (suppress/live)
     E-->>W: COMPLETE  (+ decision_log.json)
 ```

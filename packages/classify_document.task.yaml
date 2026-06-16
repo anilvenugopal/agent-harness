@@ -1,26 +1,36 @@
 # classify_document — a TASK package (unsigned YAML analog of a .vtx artifact).
 #
-# A single-turn structured transform: read a document, emit a classification.
-# Demonstrates: forced structured output (output_schema) + an S3 target write
-# (suppressed in the offline demo via MockContext.suppress_targets).
+# Single-turn structured transform: fetch a document from the store as a raw
+# binary block, send it to the model natively (PDF → Anthropic document block;
+# plain text → Anthropic text source), and emit a structured classification.
+#
+# Demonstrates: as_block source binding, ImageBlock/DocumentBlock in the IR,
+# forced structured output (output_schema), and an S3 target write.
+#
+# Prerequisites:
+#   docker compose up -d   (starts MinIO)
+#   python scripts/seed_demo.py   (uploads samples/complaint.txt)
 
 name: classify_document
 kind: task
 version: v1
-description: Classify an incoming document into a governance category.
+description: Classify an incoming document from the document store.
 
 system_prompt: |
   You are a document triage classifier for an insurance governance platform.
-  Read the document text and return a single best category with a confidence
-  score and a one-sentence rationale. Categories: claim, policy, complaint,
-  marketing, other.
+  Read the attached document and return a single best category with a confidence
+  score and a one-sentence rationale.
+
+  Categories:
+    complaint  — customer expresses dissatisfaction or demands action
+    claim      — formal insurance claim submission
+    inquiry    — question about policy, coverage, or account
+    payment    — billing issue or payment notification
+    other      — does not fit the above
 
 prompt_template: |
-  Classify the following document.
-
-  ---
-  {{input.text}}
-  ---
+  Classify the attached document.
+  document_key: {{input.document_key}}
 
 inference:
   fallback_enabled: true
@@ -35,10 +45,18 @@ inference:
   max_turns: 1
   max_usd: 0.50
 
+sources:
+  - connector: s3_main
+    method: get_bytes
+    ref: "{{input.document_key}}"
+    bind_to: document
+    as_block: document
+    required: true
+
 output_schema:
   category:
     type: string
-    enum: [claim, policy, complaint, marketing, other]
+    enum: [complaint, claim, inquiry, payment, other]
   confidence:
     type: number
   rationale:

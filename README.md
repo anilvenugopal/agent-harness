@@ -19,9 +19,12 @@ Design rationale is in [`specs/DESIGN.md`](specs/DESIGN.md); ADR mapping in
 # install deps
 pip install pydantic pyyaml rich anthropic google-genai openai
 export PYTHONPATH=$PWD
-cp .env.example .env        # fill in at least one provider key
+cp .env.example .env        # fill in at least one provider key + S3_ENDPOINT_URL
 
-# a single-turn task with forced structured output
+# seed the sample document into MinIO (MinIO must be running)
+python scripts/seed_demo.py
+
+# a single-turn task: fetch a document from MinIO, classify it
 python -m harness.cli demo classify
 
 # COPE underwriting: bind path (Chicago restaurant, all checks pass → HITL gate fires)
@@ -77,7 +80,8 @@ docker compose exec worker python -m harness.cli enqueue underwriting_agent \
 Or run synchronously with whatever keys are set:
 
 ```bash
-python -m harness.cli run classify_document --input '{"text":"..."}'
+# classify reads a document from MinIO — seed first: python scripts/seed_demo.py
+python -m harness.cli run classify_document --input '{"document_key":"documents/complaint.txt"}'
 ```
 
 ---
@@ -125,8 +129,10 @@ tests/         test_engine.py
 
 ## The three example packages
 
-- **`classify_document`** (task) — single-turn structured classification with an
-  S3 target. The minimal shape.
+- **`classify_document`** (task) — fetches a document from MinIO as a binary
+  block (`as_block: document`), attaches it natively to the model (Anthropic
+  document block / Gemini inline_data), and returns a structured classification.
+  Demonstrates the multimodal source binding and S3 target write.
 - **`underwriting_agent`** (agent) — the flagship: a Postgres source (COPE
   submission row), python tools (rate_property, bind_policy), MCP tools
   (property_data, lookup_appetite), delegation to `loss_history_analyst`, a HITL

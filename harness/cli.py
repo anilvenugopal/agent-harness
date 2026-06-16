@@ -27,6 +27,14 @@ import json
 import os
 from uuid import UUID
 
+# Load .env from the project root so API keys and connector URLs are available
+# without requiring `source .env` before every command.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
+except ImportError:
+    pass
+
 from harness.core.engine import ExecutionEngine
 from harness.core.factory import (
     build_connectors, build_engine, build_providers, load_packages,
@@ -59,7 +67,9 @@ _DEMO_INPUTS = {
     "classify": (
         "classify_document",
         "task",
-        {"text": "I have been waiting three weeks for a callback and I am furious. Escalate this now."},
+        # Reads documents/complaint.txt from MinIO. Seed first:
+        #   docker compose up -d && python scripts/seed_demo.py
+        {"document_key": "documents/complaint.txt"},
     ),
     "underwriting_bind": (
         "underwriting_agent",
@@ -83,6 +93,10 @@ async def cmd_demo(args):
     if args.scenario not in _DEMO_INPUTS:
         raise SystemExit(f"unknown scenario {args.scenario!r}. Known: {sorted(_DEMO_INPUTS)}")
     pkg_name, kind, inp = _DEMO_INPUTS[args.scenario]
+
+    print(f"\n── demo: {args.scenario} ──")
+    print(f"  package : {pkg_name}  ({kind})")
+    print(f"  input   : {json.dumps(inp)}\n")
 
     packages  = load_packages(PACKAGE_DIR)
     providers = build_providers()

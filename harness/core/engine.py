@@ -37,7 +37,7 @@ from uuid import UUID, uuid4
 
 from harness.connectors.binder import Binder, _template as render_template
 from harness.core.ir import (
-    Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
+    DocumentBlock, ImageBlock, Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
     ToolDef, ToolResultBlock, ToolUseBlock,
 )
 from harness.core.package import EntityKind, Package
@@ -114,7 +114,7 @@ class ExecutionEngine:
 
             system = pkg.system_prompt
             user = render_template(pkg.prompt_template or "{{input}}", {"input": input_data, "context": context})
-            messages = [Message.user_text(user if isinstance(user, str) else json.dumps(input_data))]
+            messages = [_first_user_message(pkg, user, input_data, context)]
 
             # Force structured output via a synthetic tool when a schema is declared.
             force_tool = None
@@ -185,7 +185,7 @@ class ExecutionEngine:
                                                 detail={"bind_to": a["bind_to"], "mocked": a["mocked"]}))
             merged = {**context, **src_ctx}
             user = render_template(pkg.prompt_template or "{{input}}", {"input": context, "context": src_ctx})
-            messages = [Message.user_text(user if isinstance(user, str) else json.dumps(merged))]
+            messages = [_first_user_message(pkg, user, merged, src_ctx)]
 
             quota = QuotaEnforcer(max_turns=pkg.inference.max_turns,
                                   max_total_tokens=pkg.inference.max_total_tokens,
@@ -530,6 +530,31 @@ class ExecutionEngine:
             status=RunStatus.FAILED, output={}, decision_log_id=decision_id, duration_ms=duration,
             error_message=str(exc),
         )
+
+
+def _first_user_message(pkg, user, fallback_input: dict, src_ctx: dict) -> Message:
+    """Build the opening user message, appending image/document blocks from binary sources."""
+    text = user if isinstance(user, str) else json.dumps(fallback_input)
+    blocks: list = [TextBlock(text=text)]
+    for src in pkg.sources:
+        if not src.as_block:
+            continue
+        meta = src_ctx.get(src.bind_to)
+        if not isinstance(meta, dict) or "_as_block" not in meta:
+            continue
+        if meta["_as_block"] == "image":
+            blocks.append(ImageBlock(
+                media_type=meta["_media_type"],
+                data_b64=meta["_data_b64"],
+                title=meta.get("_title"),
+            ))
+        elif meta["_as_block"] == "document":
+            blocks.append(DocumentBlock(
+                media_type=meta["_media_type"],
+                data_b64=meta["_data_b64"],
+                title=meta.get("_title"),
+            ))
+    return Message(role="user", content=blocks)
 
 
 def _try_json(text: str):

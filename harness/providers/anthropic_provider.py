@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Optional
 
 from harness.core.ir import (
-    Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
+    DocumentBlock, ImageBlock, Message, ModelResponse, StopReason, TextBlock, ThinkingBlock,
     ToolDef, ToolResultBlock, ToolUseBlock, Usage,
 )
 from harness.core.package import ModelRef
@@ -96,12 +96,34 @@ class AnthropicProvider:
 
 
 def _to_anthropic_msg(m: Message) -> dict:
+    import base64
     # Anthropic uses roles user/assistant only; tool results ride inside a user msg.
     role = "assistant" if m.role == "assistant" else "user"
     content = []
     for b in m.content:
         if isinstance(b, TextBlock):
             content.append({"type": "text", "text": b.text})
+        elif isinstance(b, ImageBlock):
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": b.media_type, "data": b.data_b64},
+            })
+        elif isinstance(b, DocumentBlock):
+            if b.media_type == "application/pdf":
+                item: dict = {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": b.data_b64},
+                }
+            else:
+                # Plain-text document: decode bytes and send as text source.
+                text_content = base64.b64decode(b.data_b64).decode("utf-8", errors="replace")
+                item = {
+                    "type": "document",
+                    "source": {"type": "text", "media_type": b.media_type, "data": text_content},
+                }
+            if b.title:
+                item["title"] = b.title
+            content.append(item)
         elif isinstance(b, ToolUseBlock):
             content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
         elif isinstance(b, ToolResultBlock):
