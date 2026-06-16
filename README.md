@@ -69,7 +69,7 @@ Two payoffs fall out of this single idea:
 
 ```
                      ┌───────────────────────────────────────────────┐
-Package (.yaml)  ───▶│                ExecutionEngine                 │
+Package (.yaml)  ───>│                ExecutionEngine                │
 (the governed unit)  │                                               │
                      │  run_task() · run_agent() · resume()          │
                      │                   │                           │
@@ -82,14 +82,14 @@ Package (.yaml)  ───▶│                ExecutionEngine                 
                    ┌────────┐┌────────┐┌────────┐┌────────┐┌──────────┐
                    │ MODEL  ││  TOOL  ││ SOURCE ││ TARGET ││ DECISION │
                    │gateway ││gateway ││ binder ││ binder ││ assembler│
-                   └───┬────┘└───┬────┘└───┬────┘└───┬────┘└────┬─────┘
-       ┌───────────────┤         │         │         │          │
-       ▼      ▼      ▼ │    ┌────┴────┐ ┌──┴────┐ ┌──┴────┐ ┌──▼─────┐
-   ┌──────┐┌──────┐┌───┐│   │  auth   │ │  PG   │ │  S3   │ │File /  │
-   │claude││openai││...││   │ enforce │ │connect│ │connect│ │Postgres│
-   └──────┘└──────┘└───┘│   └────┬────┘ └───────┘ └───────┘ │  sink  │
-    (provider adapters)  │  ┌────┴─────┬───────────┐         └────────┘
-                         │  ▼          ▼           ▼
+                   └────┬───┘└────┬───┘└────┬───┘└────┬───┘└─────┬────┘
+       ┌────────────────┤         │         │         │          │
+       ▼      ▼      ▼  │    ┌────┴────┐ ┌──┴────┐ ┌──┴────┐ ┌───▼────┐
+  ┌──────┐┌──────┐┌───┐ │    │  auth   │ │  PG   │ │  S3   │ │File /  │
+  │claude││openai││...│ │    │ enforce │ │connect│ │connect│ │Postgres│
+  └──────┘└──────┘└───┘ │    └────┬────┘ └───────┘ └───────┘ │  sink  │
+    (provider adapters) │    ┌────┴─────┬───────────┐        └────────┘
+                        │    ▼          ▼           ▼
                     ┌─────────┐  ┌──────────┐ ┌──────────┐
                     │ python  │  │   MCP    │ │ verity   │
                     │ tools   │  │ stdio /  │ │ builtin  │
@@ -307,3 +307,6 @@ cell-by-cell.
   so only the mock path is locally verifiable.
 - **Reproduction** is bit-exact for single-shot task recordings. Delegating /
   suspending agents record per-segment; tree replay is a roadmap item.
+
+## License
+AGPL-3.0 — see [LICENSE](LICENSE).
