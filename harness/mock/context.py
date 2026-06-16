@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """MockContext — playback/suppress control for all four gateways at once.
 
 This is the single object that flips any combination of the engine's four

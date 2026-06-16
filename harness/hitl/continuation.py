@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """HITL continuation store — durable suspend/resume (design decision D6).
 
 The agent loop is a resumable state machine; a HITL approval gate is just one

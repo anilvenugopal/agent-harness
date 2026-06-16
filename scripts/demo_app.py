@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # demo_app.py — python_inprocess tools for the underwriting_agent demo.
 #
 # rate_property: COPE rating engine (Construction, Occupancy, Protection, Exposure).

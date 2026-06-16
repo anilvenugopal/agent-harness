@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """MCP client — bridge to external MCP servers (ADR-0016 Category A).
 
 A connection pool keyed by server name. Opens sessions lazily on first use,

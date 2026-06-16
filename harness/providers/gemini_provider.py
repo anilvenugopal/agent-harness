@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Gemini adapter — google-genai SDK.
 
 Targets the unified `google-genai` SDK (`from google import genai`), using

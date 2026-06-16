@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tool gateway — the single chokepoint for every tool call.
 
 Order of operations for one model-requested tool (ADR-0016 §2):

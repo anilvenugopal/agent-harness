@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Execution result + event types, and the HITL suspension signal.
 
 `ExecutionResult` is what a run returns to its caller (worker, CLI, or a

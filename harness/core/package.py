@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Package schema — the governed unit of execution.
 
 This is the unsigned, YAML-loadable analog of Verity's signed `.vax` (agent)

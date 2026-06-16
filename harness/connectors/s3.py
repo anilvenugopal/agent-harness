@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """S3 / object-store connector — Category B object access.
 
 Methods:

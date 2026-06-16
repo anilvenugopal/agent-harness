@@ -29,6 +29,7 @@ when a module points you there, or when you want depth on a specific topic.
 |---|---|---|
 | [A01](appendix-01-agent-loop-basics.md) | Agent Loop Basics — Raw Claude, Gemini, OpenAI | After Module 02, to see what the harness replaces |
 | [A02](appendix-02-async-python.md) | Async Python from First Principles | Any time — when `async/await` in the engine feels unclear |
+| [A03](appendix-03-cope-underwriting.md) | COPE Underwriting — Rating, Binding, and Referral | After Module 11, or whenever the underwriting demo needs domain context |
 
 ---
 

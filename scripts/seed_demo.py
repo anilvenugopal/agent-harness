@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #!/usr/bin/env python
 """Upload sample documents to MinIO for the classify demo.
 

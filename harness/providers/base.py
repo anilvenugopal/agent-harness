@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model providers — the seam between the loop and the LLM vendors.
 
 A `ModelProvider` does exactly one thing: take a neutral request (system

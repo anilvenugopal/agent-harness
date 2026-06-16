@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Engine factory — wire the parts into a runnable ExecutionEngine.
 
 Two entry points:

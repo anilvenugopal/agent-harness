@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Rich tracer — watch the loop breathe (design decision D10).
 
 Renders each ExecutionEvent as a coloured, indented line (indentation =

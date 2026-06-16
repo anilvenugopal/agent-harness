@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """End-to-end offline smoke test — zero API keys, zero external infra.
 
 Exercises every load-bearing path through the engine using only the mock

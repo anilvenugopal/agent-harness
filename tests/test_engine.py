@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Offline test suite — runs with zero keys / zero infra.
 
 Uses asyncio.run() inside sync tests so it needs no pytest-asyncio plugin.

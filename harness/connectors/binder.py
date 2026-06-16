@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Input/output binder — works over the connector registry.
 
 The binder is the layer between the package's declarative bindings and the raw

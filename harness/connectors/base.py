@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Connector framework — base contract.
 
 A Connector talks to one external system (Postgres, S3, a REST API). It

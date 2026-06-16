@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """OpenAI adapter — Responses API.
 
 Targets the `openai` Python SDK (AsyncOpenAI, `client.responses.create`). We

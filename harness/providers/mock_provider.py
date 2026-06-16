@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Mock model provider — offline execution and deterministic replay.
 
 This is not a throwaway test stub; it is load-bearing (design decision D7).

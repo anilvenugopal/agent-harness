@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Worker — the worker-mode dispatch path (Postgres SKIP LOCKED).
 
 This is the v1 claim loop, which ADR-0015 explicitly preserves as the

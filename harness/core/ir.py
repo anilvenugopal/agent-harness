@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Neutral Intermediate Representation (IR).
 
 This is the spine of the whole engine. The agentic loop, the tool gateway,

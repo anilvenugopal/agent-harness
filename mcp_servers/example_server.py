@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """MCP policy_service (ADR-0016 Category A — application-side tool server).
 
 Exposes three tools the underwriting packages route to over MCP:

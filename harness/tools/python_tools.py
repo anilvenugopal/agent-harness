@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """In-process Python tools (ADR-0016 Category B-ish / built-in callables).
 
 A tiny registry mapping tool name → callable. The worker/app registers these

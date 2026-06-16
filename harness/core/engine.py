@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Execution engine — the provider-agnostic agentic loop and its siblings.
 
 This is where the spine comes together. The engine owns the loop; the four

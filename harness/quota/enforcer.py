@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Quota enforcer (ADR-0016 Category C).
 
 Checked BEFORE every model call. Enforces the per-run ceilings declared on the
