@@ -94,79 +94,74 @@ structured event at every stage).
 
 ---
 
-## Quick start (no infrastructure required)
+## Quick start
 
 ```bash
-pip install pydantic pyyaml rich anthropic google-genai openai
-export PYTHONPATH=$PWD
-cp .env.example .env        # fill in at least one provider key + S3_ENDPOINT_URL
+cp .env.example .env        # fill in at least one provider key
+pip install -r requirements.txt
 ```
 
-Run the demos (real API keys required; MinIO must be running for document demos):
+### Option A — Interactive demo app (recommended)
 
 ```bash
-# seed the sample document into MinIO
-python scripts/seed_demo.py
-
-# single-turn task: fetch a document from MinIO, classify it
-python -m harness.cli demo classify
-
-# COPE underwriting: bind path (Chicago restaurant, all checks pass → HITL gate fires)
-python -m harness.cli demo underwriting_bind --auto-approve
-
-# COPE underwriting: refer path (Tampa warehouse, TIV/loss/wind checks fail → refer)
-python -m harness.cli demo underwriting_refer
-
-# step through the loop one stage at a time (great with a debugger)
-python -m harness.cli demo underwriting_bind --step
+./run_demo
 ```
 
-Run the test suite (no keys needed — uses MockProvider):
+A menu-driven TUI (`InquirerPy` + `Rich`) that handles everything without
+remembering any flags:
+
+```
+  status        Show Docker service health
+  up            Start the Docker stack (infra only or full stack)
+  down          Stop the stack (keep or wipe volumes)
+  seed          Upload demo documents to MinIO
+  run           Pick a scenario, set options, execute
+  runs          Browse decision logs and model turns
+  logs          Tail a service log
+  suspensions   Browse and action HITL suspensions
+  quit
+```
+
+Typical first session:
+
+1. **up → full stack** — starts Postgres, MinIO, MCP server, worker, JupyterLab
+2. **seed** — uploads `samples/complaint.txt` to MinIO
+3. **run → classify** — classifies the complaint document
+4. **run → underwriting_bind (auto-approve)** — full COPE workflow, HITL, bind
+5. **run → underwriting_refer** — refer path, no HITL
+6. **runs** — inspect the decision logs and model turns
+7. **down** — stop the stack
+
+### Option B — Jupyter notebook (cell-by-cell walkthrough)
+
+Start the Docker stack once (`./run_demo → up → full stack`), then open:
+
+```
+http://localhost:8888
+```
+
+Open `notebooks/walkthrough.ipynb`. Each section is a self-contained
+executable cell: package explorer, data explorer, classify task, underwriting
+refer, underwriting bind + HITL widget.
+
+### Run the test suite (no keys, no infra)
 
 ```bash
 PYTHONPATH=$PWD python tests/test_engine.py     # or: pytest -q
 ```
 
-Inspect the decision artifacts (ADR-0015 layout):
+### Inspect decision artifacts
 
 ```
-_artifacts/runs/2026/06/13/<run_id>/
+_artifacts/runs/YYYY/MM/DD/<run_id>/
     decision_log.json          # full governance record (31 fields)
     model_invocations.jsonl    # one line per model turn (drives replay)
 ```
 
-Reproduce a past run deterministically:
+### Reproduce a past run deterministically
 
 ```bash
-python -m harness.cli reproduce <run_id>        # replays its recording
-```
-
----
-
-## Run it live (Docker stack)
-
-```bash
-cp .env.example .env        # add ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
-docker compose --env-file .env -f docker/docker-compose.yml up --build
-```
-
-This brings up Postgres (run queue + demo data), MinIO (S3), the example MCP
-server (Streamable HTTP), a **worker** (Postgres `SKIP LOCKED`), and
-**JupyterLab** at <http://localhost:8888>.
-
-Enqueue and watch a worker pick it up:
-
-```bash
-docker compose exec worker python -m harness.cli enqueue underwriting_agent \
-    --input '{"submission_id":1}'
-```
-
-Or run synchronously:
-
-```bash
-# seed first if using MinIO
-python scripts/seed_demo.py
-python -m harness.cli run classify_document --input '{"document_key":"documents/complaint.txt"}'
+python -m harness.cli reproduce <run_id>        # replays its recording, no live API call
 ```
 
 ---
@@ -174,6 +169,7 @@ python -m harness.cli run classify_document --input '{"document_key":"documents/
 ## Repo layout
 
 ```
+run_demo       Interactive TUI — primary entry point (menu-driven)
 harness/
   core/        ir.py · package.py · engine.py · result.py · trace.py · factory.py
   providers/   base.py (chain) · anthropic_/openai_/gemini_/mock_provider.py
@@ -185,11 +181,12 @@ harness/
   decisions/   assembler.py (record + File/Postgres sinks)
   mock/        context.py (one object, four gateway seams)
   worker/      worker.py (Postgres SKIP LOCKED claim loop)
-  cli.py       demo · run · enqueue · worker · resume · reproduce · list-suspensions
+  cli.py       Programmatic CLI: run · enqueue · worker · resume · reproduce · list-suspensions
+demo/          TUI app backing run_demo (InquirerPy menus, log viewers)
 packages/      classify_document.task.yaml · underwriting_agent.agent.yaml · loss_history_analyst.agent.yaml
 mcp_servers/   example_server.py (FastMCP; stdio + http)
-scripts/       demo_app.py (rate_property, bind_policy) · smoke_test.py
-notebooks/     walkthrough.ipynb
+scripts/       demo_app.py (rate_property, bind_policy) · seed_demo.py
+notebooks/     walkthrough.ipynb — cell-by-cell engine walkthrough in JupyterLab
 docker/        Dockerfile · docker-compose.yml · initdb/01_schema.sql
 specs/         ADR-COMPATIBILITY.md · INTEGRATION.md
 tests/         test_engine.py
@@ -246,11 +243,12 @@ reproducing a run): **[Runbook](docs/runbook.md)**.
 ## Debugging
 
 The Rich tracer turns every loop stage into a structured event (indentation =
-delegation depth). `--step` pauses after each event. For source-level debugging,
-set a breakpoint in `harness/core/trace.py:Tracer.emit` or in any gateway and run
-a `demo` scenario — you stop with the full neutral IR state in scope, no vendor
-objects in the way. The notebook (`notebooks/walkthrough.ipynb`) is the same flow
-cell-by-cell.
+delegation depth). In `./run_demo → run`, toggle the **step** option to pause after
+each model turn. In the notebook (`notebooks/walkthrough.ipynb`), cells execute
+one stage at a time — the best way to inspect the neutral IR mid-run. For
+source-level debugging, set a breakpoint in `harness/core/trace.py:Tracer.emit`
+or in any gateway — you stop with the full neutral IR state in scope, no vendor
+objects in the way.
 
 ---
 

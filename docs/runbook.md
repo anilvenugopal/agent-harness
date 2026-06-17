@@ -91,6 +91,9 @@ S3_SECRET_KEY=minioadmin
 ```
 agent-harness/
 │
+├── run_demo                    ENTRY POINT — interactive TUI (./run_demo to launch)
+├── demo/                       TUI app (InquirerPy menus, log viewers, scenario runner)
+│
 ├── harness/                    THE ENGINE — all runtime logic
 │   ├── core/
 │   │   ├── ir.py               Neutral message types (TextBlock, ToolUseBlock, etc.)
@@ -465,10 +468,7 @@ binary block, attaches it natively to the model (Anthropic `document` block,
 Gemini `inline_data`), and returns a structured classification. One model turn,
 no tools.
 
-Requires MinIO running and the document seeded:
-```bash
-python scripts/seed_demo.py     # uploads samples/complaint.txt → MinIO documents/complaint.txt
-```
+Requires MinIO running and the document seeded (seed via `./run_demo → seed`).
 
 ```
 Input:  { "document_key": "documents/complaint.txt" }
@@ -482,8 +482,7 @@ underwrites submission #1 (Lakeview Bistro LLC, Chicago IL — restaurant, joist
 masonry, PPC 4, sprinklered, $1.85M TIV). It runs the full COPE workflow:
 delegates loss history analysis, checks carrier appetite, retrieves property
 enrichment, rates the risk, passes all checks, and calls `bind_policy`. The HITL
-gate fires — the run suspends until an underwriter approves. With `--auto-approve`
-the approval is recorded automatically and the run completes.
+gate fires — the run suspends until an underwriter approves.
 
 ```
 Input:  { "submission_id": 1 }
@@ -506,33 +505,28 @@ Output: { decision: "refer", referral_reasons: [...], premium: 62726, ... }
 
 ---
 
-### Demo commands
+### Primary path: `./run_demo`
 
-Set the PYTHONPATH (keys are loaded from `.env` automatically):
-
-```bash
-export PYTHONPATH=/path/to/agent-harness
-```
-
-#### Scenario 1: classify
-
-Seed once (MinIO must be running):
-```bash
-python scripts/seed_demo.py
-```
-
-Then:
-```bash
-.venv/bin/python -m harness.cli demo classify
-```
-
-#### Scenario 2: underwriting bind (with auto-approve)
+The interactive TUI is the recommended way to run demos. From the project root:
 
 ```bash
-.venv/bin/python -m harness.cli demo underwriting_bind --auto-approve
+./run_demo
 ```
 
-**Execution flow:**
+**Typical first session:**
+
+```
+  1. up → full stack        Start all five services (postgres, minio, mcp-server, worker, jupyter)
+  2. seed                   Upload samples/complaint.txt to MinIO
+  3. run → classify         Classify the complaint; inspect result
+  4. run → underwriting_bind
+       options: auto-approve ✓   Full COPE workflow → HITL auto-approved → bound
+  5. run → underwriting_refer    Refer path; no HITL gate
+  6. runs                   Browse decision logs and model turns for every past run
+  7. down                   Stop the stack (keep volumes)
+```
+
+**Execution flow for underwriting_bind:**
 
 ```
 underwriting_agent (depth 0)
@@ -552,86 +546,102 @@ underwriting_agent (depth 0)
 │
 ├─ Turn 4: bind_policy(...)
 │           ⏸ HITL gate fires — run suspends
-│           --auto-approve: records approval, resumes
+│           auto-approve: records approval, resumes
 │
 └─ Turn 5: submit_output({decision:"bound", premium:7438, ...})
    └─ 3 decision records: underwriting_agent + loss_history_analyst + (resumed)
 ```
 
-#### Scenario 3: underwriting refer (no auto-approve needed)
+**Manual HITL (without auto-approve):**
+
+In `./run_demo → run`, leave **auto-approve** unselected. When the gate fires,
+the TUI presents: approve / deny / save. Saved suspensions appear in
+`./run_demo → suspensions` where you can action them later.
+
+---
+
+### Secondary path: Jupyter notebook
+
+With the stack running (`./run_demo → up → full stack`), open:
+
+```
+http://localhost:8888
+```
+
+Open `notebooks/walkthrough.ipynb` and run cells in order:
+
+| Section | What it shows |
+|---|---|
+| 1. Package Explorer | Inspect the YAML packages loaded into the engine |
+| 2. Data Explorer | Query Postgres submissions, list MinIO objects, call MCP tools live |
+| 3. classify_document | Run the classify task; inspect the decision log |
+| 4. underwriting_refer | Full agent run, refer path, no HITL |
+| 5. underwriting_bind + HITL | Bind path + interactive HITL approval widget |
+
+---
+
+### Advanced / programmatic: CLI
+
+For scripting, CI, or non-interactive use, the CLI is still available.
 
 ```bash
+export PYTHONPATH=/path/to/agent-harness
+```
+
+#### Run a scenario
+
+```bash
+# classify (MinIO must be seeded)
+.venv/bin/python -m harness.cli demo classify
+
+# underwriting bind (auto-approve the HITL gate)
+.venv/bin/python -m harness.cli demo underwriting_bind --auto-approve
+
+# underwriting bind (step mode — pauses after each stage)
+.venv/bin/python -m harness.cli demo underwriting_bind --step
+
+# underwriting refer
 .venv/bin/python -m harness.cli demo underwriting_refer
 ```
 
-Runs through the same COPE steps for submission #2. All bind authority checks fail
-(TIV $8M > authority $5M, loss_ratio 0.82 > 0.60 threshold, wind_zone="high"
-and coast distance 3 mi). The agent calls `submit_output` directly — no HITL gate,
-no suspension. Completes with `decision=refer` and referral_reasons populated.
-
-#### Step mode (pause after each stage)
+#### Run any package with a custom input
 
 ```bash
-.venv/bin/python -m harness.cli demo underwriting_bind --step
+PYTHONPATH=. .venv/bin/python -m harness.cli run classify_document \
+    --input '{"document_key": "documents/complaint.txt"}'
+
+# Force Gemini fallback:
+ANTHROPIC_API_KEY="" PYTHONPATH=. .venv/bin/python -m harness.cli run classify_document \
+    --input '{"document_key": "documents/complaint.txt"}'
 ```
 
-Pauses after each trace event and waits for Enter. Set a breakpoint in
-`harness/core/trace.py:Tracer.emit` to inspect full loop state.
-
-#### Manual HITL (suspend, then resume separately)
+#### Manual HITL via CLI
 
 ```bash
-# Step 1: Run without --auto-approve — it will suspend at bind_policy
+# 1. Run without --auto-approve — suspends at bind_policy
 .venv/bin/python -m harness.cli demo underwriting_bind
 
 # ⏸  SUSPENDED: gate='bind_policy' suspension=<uuid>
-# resume with: python -m harness.cli resume <uuid> --decision approve
 
-# Step 2: List pending suspensions
+# 2. List pending suspensions
 .venv/bin/python -m harness.cli list-suspensions
 
-# Step 3: Approve, deny, or edit
+# 3. Approve, deny, or edit
 .venv/bin/python -m harness.cli resume <uuid> --decision approve
 .venv/bin/python -m harness.cli resume <uuid> --decision deny --note "refer to senior uw"
 .venv/bin/python -m harness.cli resume <uuid> --decision edit \
     --edited-input '{"submission_id": 1, "premium": 6900.0, "limit": 1850000, "deductible": 5000}'
 ```
 
----
-
-### Live run via CLI (any package, any input)
+#### Enqueue via worker queue (Docker required)
 
 ```bash
-# classify_document reads a document from MinIO — seed first if not done:
-python scripts/seed_demo.py
-
-PYTHONPATH=. .venv/bin/python -m harness.cli run classify_document \
-    --input '{"document_key": "documents/complaint.txt"}'
-```
-
-Force Gemini fallback by unsetting the Anthropic key:
-
-```bash
-ANTHROPIC_API_KEY="" PYTHONPATH=. .venv/bin/python -m harness.cli run classify_document \
-    --input '{"document_key": "documents/complaint.txt"}'
-```
-
-### Live agent via worker queue (Docker required)
-
-```bash
-# Enqueue the job
 docker compose --project-directory . -f docker/docker-compose.yml \
   exec worker python -m harness.cli enqueue underwriting_agent \
   --input '{"submission_id": 1}'
 
 # Watch the worker pick it up
 docker compose --project-directory . -f docker/docker-compose.yml logs -f worker
-
-# When it suspends, list and approve
-docker compose --project-directory . -f docker/docker-compose.yml \
-  exec worker python -m harness.cli list-suspensions
-docker compose --project-directory . -f docker/docker-compose.yml \
-  exec worker python -m harness.cli resume <suspension-uuid> --decision approve
 
 # Refer path (no suspension):
 docker compose --project-directory . -f docker/docker-compose.yml \
@@ -641,7 +651,7 @@ docker compose --project-directory . -f docker/docker-compose.yml \
 
 ---
 
-#### Audit replay: reproduce any past run
+### Audit replay: reproduce any past run
 
 ```bash
 # Find a run ID from the artifacts:
@@ -742,25 +752,37 @@ and continues with the remaining providers. This is not an error — install wit
 ## 12. Quick Reference Card
 
 ```
-DEMO COMMANDS (real API keys required; .env loaded automatically)
-  demo classify                         → task: fetch document from MinIO, classify it
+PRIMARY ENTRY POINTS
+  ./run_demo                     Interactive TUI — status/up/down/seed/run/runs/logs/suspensions
+  http://localhost:8888          JupyterLab — notebooks/walkthrough.ipynb (stack must be running)
+
+DEMO APP MENU ACTIONS (./run_demo)
+  status       Show Docker service health
+  up           Start the stack (infra only or full stack)
+  down         Stop the stack (keep or wipe volumes)
+  seed         Upload samples/complaint.txt to MinIO
+  run          Select scenario + options (auto-approve, step), execute
+  runs         Browse decision logs and model turns
+  logs         Tail a service log
+  suspensions  Browse and action HITL suspensions
+
+PROGRAMMATIC CLI (keys in .env loaded automatically)
+  demo classify                         → classify task (MinIO source)
   demo underwriting_bind --auto-approve → bind path: COPE rating, HITL, auto-approve
   demo underwriting_bind --step         → same, pause after each stage
   demo underwriting_bind                → suspend at bind_policy; resume manually
   demo underwriting_refer               → refer path: frame warehouse, no HITL gate
-
-LIVE RUNS (keys in .env loaded automatically)
-  run classify_document --input '{"document_key":"documents/complaint.txt"}'  → real Claude
-  ANTHROPIC_API_KEY="" run classify_document ...                               → force Gemini
-  reproduce <run-id>                                                           → audit replay
+  run classify_document --input '{"document_key":"documents/complaint.txt"}'
+  ANTHROPIC_API_KEY="" run classify_document ...    → force Gemini fallback
+  reproduce <run-id>                                → audit replay (no API call)
+  list-suspensions
+  resume <suspension-id> --decision approve|deny|edit
 
 WORKER MODE (Docker stack required)
   enqueue underwriting_agent --input '{"submission_id":1}'   → bind path
   enqueue underwriting_agent --input '{"submission_id":2}'   → refer path
-  list-suspensions
-  resume <suspension-id> --decision approve|deny|edit
 
-DOCKER
+DOCKER (all commands from project root)
   up:   docker compose --project-directory . --env-file .env -f docker/docker-compose.yml up --build -d
   ps:   docker compose --project-directory . -f docker/docker-compose.yml ps
   logs: docker compose --project-directory . -f docker/docker-compose.yml logs -f worker
@@ -775,7 +797,4 @@ POSTGRES (inside Docker)
 
 MINIO UI
   http://localhost:9001  (minioadmin / minioadmin)
-
-JUPYTERLAB
-  http://localhost:8888
 ```
