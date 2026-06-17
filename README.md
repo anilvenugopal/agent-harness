@@ -234,6 +234,9 @@ layer of the engine with ASCII diagrams and checkpoint questions:
 | [09 — Decision log](docs/09-decision-log.md) | Assembler accumulation, FileSink layout, replay |
 | [10 — Worker](docs/10-worker.md) | SKIP LOCKED claim loop, state machine, retry |
 | [11 — End-to-end](docs/11-end-to-end.md) | Full underwriting run traced through every layer |
+| [A01 — Agent loop basics](docs/appendix-01-agent-loop-basics.md) | Basics of agentic AI execution |
+| [A02 — Async python](docs/appendix-02-async-python.md) | Python async execution |
+| [A03 — COPE underwriting](docs/appendix-03-cope-underwriting.md) | COPE rating framework, binding vs. referral, worked examples from both demo scenarios |
 
 For operational tasks (seeding MinIO, running demos, checking artifacts,
 reproducing a run): **[Runbook](docs/runbook.md)**.
