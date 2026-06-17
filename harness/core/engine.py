@@ -175,7 +175,7 @@ class ExecutionEngine:
         started = time.monotonic()
         assembler = self._new_assembler(pkg, run_id, channel, context, mock, depth,
                                         parent_decision_id=parent_decision_id)
-        assembler.record.hitl_required = pkg.hitl.enabled
+        assembler.record.hitl_required = False  # set True only if the gate actually fires
         self.tracer.emit(ExecutionEvent(type=EventType.RUN_STARTED, run_id=run_id, depth=depth,
                                         detail={"entity": agent_name, "kind": "agent"}))
         try:
@@ -356,6 +356,7 @@ class ExecutionEngine:
                         gate_tool=tc.name, pending_tool_use={"id": tc.id, "name": tc.name, "input": tc.input},
                         mock=mock.model_dump() if mock is not None else None,
                     )
+                    assembler.record.hitl_required = True
                     await self.continuations.save(cont)
                     self.tracer.emit(ExecutionEvent(type=EventType.HITL_SUSPENDED, run_id=run_id, depth=depth,
                                                     detail={"suspension_id": str(cont.id), "tool": tc.name}))
