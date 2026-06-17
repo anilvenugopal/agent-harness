@@ -74,7 +74,7 @@ services:
       # false disables all fallback regardless of package settings.
       HARNESS_FALLBACK_ENABLED: "${HARNESS_FALLBACK_ENABLED:-true}"
     volumes:
-      - ../_artifacts:/app/_artifacts
+      - ./_artifacts:/app/_artifacts
 
   jupyter:
     build: { context: ., dockerfile: docker/Dockerfile }
@@ -95,7 +95,7 @@ services:
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
     volumes:
       - ./notebooks:/app/notebooks
-      - ../_artifacts:/app/_artifacts
+      - ./_artifacts:/app/_artifacts
 
 volumes:
   pgdata:

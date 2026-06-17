@@ -55,7 +55,7 @@ def print_decision_log(log: dict) -> None:
         + (f"  cache_read={log['cache_read_tokens']}" if log.get('cache_read_tokens') else "")
         + f"\n[dim]models:[/]  {', '.join(log.get('models_used') or ['—'])}"
         + (f"\n[dim]channel:[/] {log['channel']}" if log.get('channel') else "")
-        + ("\n[yellow]hitl:[/]     required" if log.get("hitl_required") else "")
+        + ("\n[dark_orange]hitl:[/]     required" if log.get("hitl_required") else "")
     )
     if log.get("parent_decision_id"):
         header += f"\n[dim]parent:[/]  {log['parent_decision_id']}"
@@ -151,7 +151,7 @@ def print_model_invocations(invocations: list[dict]) -> None:
         console.print(
             f"\n[bold dim]turn {turn}[/]  "
             f"[cyan]{provider}[/]  [cyan]{model}[/]  "
-            f"stop=[yellow]{stop}[/]  "
+            f"stop=[dark_orange]{stop}[/]  "
             f"[dim]in={in_tok} out={out_tok}[/]"
         )
 
@@ -223,6 +223,6 @@ def print_hitl(suspensions: list[dict]) -> None:
             if dec.get("note"):
                 console.print(f"  note: {dec['note']}")
         else:
-            console.print("\n[yellow]Awaiting decision[/]")
+            console.print("\n[dark_orange]Awaiting decision[/]")
 
         console.print()

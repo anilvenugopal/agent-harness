@@ -23,6 +23,7 @@ COPY harness/ ./harness/
 COPY packages/ ./packages/
 COPY mcp_servers/ ./mcp_servers/
 COPY scripts/ ./scripts/
+COPY demo/ ./demo/
 COPY notebooks/ ./notebooks/
 
 # Default role: the Postgres SKIP LOCKED worker. Override `command:` per service.

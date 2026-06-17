@@ -155,7 +155,7 @@ def _print_result(res) -> None:
 def status_action() -> None:
     rows = compose_json("ps", "--format", "json")
     if not rows:
-        console.print("[yellow]No containers running.[/]")
+        console.print("[dark_orange]No containers running.[/]")
         return
     for r in rows:
         name   = r.get("Service", r.get("Name", "?"))
@@ -264,7 +264,7 @@ async def _run_scenario(s: dict, inp: dict, *, auto_approve: bool, step: bool) -
         _print_result(res)
     except HITLSuspended as exc:
         console.print(
-            f"\n[yellow]⏸  Suspended[/]  gate=[bold]{exc.gate_tool}[/]"
+            f"\n[dark_orange]⏸  Suspended[/]  gate=[bold]{exc.gate_tool}[/]"
             f"  suspension_id={exc.suspension_id}"
         )
         if auto_approve:
@@ -455,7 +455,7 @@ def runs_action() -> None:
         jsonl = next(
             (p for p in run_dir.rglob(f"{run_id}/model_invocations.jsonl")), None)
         if jsonl is None:
-            console.print("[yellow]model_invocations.jsonl not found for this run.[/]")
+            console.print("[dark_orange]model_invocations.jsonl not found for this run.[/]")
             return
         invocations = [
             json.loads(line)
